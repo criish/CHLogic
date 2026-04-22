@@ -8,7 +8,7 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const qrcode = require('qrcode');
-const axios = require('axios'); // Motor ultra-leve para o Sigma
+const axios = require('axios'); 
 const session = require('express-session');
 const sqlite3 = require('sqlite3');
 const { open } = require('sqlite');
@@ -50,7 +50,7 @@ app.use(express.json());
 app.use(express.static('public'));
 
 // ==========================================
-// 🚀 MOTOR DE DISPARO (MODO API - ULTRA LEVE)
+// 🚀 MOTOR DE DISPARO (MODO API - SEM NAVEGADOR)
 // ==========================================
 async function dispararCobrancaSaaS(userId) {
     const user = await db.get('SELECT * FROM users WHERE id = ?', [userId]);
@@ -61,15 +61,21 @@ async function dispararCobrancaSaaS(userId) {
     const log = (msg) => {
         const dataHora = new Date().toLocaleTimeString('pt-BR');
         const linha = `[${dataHora}] ${msg}`;
-        console.log(`[ID ${userId}] ${linha}`); // Imprime no Terminal (Termius)
-        io.to(`room_${userId}`).emit('novo_log', linha); // Imprime na Página (Chrome)
+        console.log(`[ID ${userId}] ${linha}`); 
+        io.to(`room_${userId}`).emit('novo_log', linha); 
     };
 
     try {
-        log(`📡 Tentando login via API no Sigma...`);
+        // --- LIMPEZA INTELIGENTE DA URL ---
+        // Se o usuário colou "https://site.pro/#/login", pegamos apenas "https://site.pro"
+        let urlBase = user.painel_url.split('/#')[0]; 
+        urlBase = urlBase.replace(/\/$/, ''); // Remove a última barra se existir
         
-        // Login direto via HTTP (Baseado na captura do seu script)
-        const response = await axios.post(`${user.painel_url.replace(/\/$/, '')}/api/auth/login`, {
+        const loginUrl = `${urlBase}/api/auth/login`;
+        log(`📡 Conectando ao Sigma: ${loginUrl}`);
+        
+        // Login direto via HTTP (Consome 0% de RAM gráfica)
+        const response = await axios.post(loginUrl, {
             captcha: "not-a-robot",
             captchaChecked: true,
             username: user.usuario_sigma,
@@ -77,24 +83,34 @@ async function dispararCobrancaSaaS(userId) {
             twofactor_code: "",
             twofactor_recovery_code: "",
             twofactor_trusted_device_id: ""
+        }, {
+            headers: {
+                'Content-Type': 'application/json',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            }
         });
 
         if (response.status === 200) {
-            log(`✅ LOGIN REALIZADO COM SUCESSO NO SIGMA!`);
-            log(`👤 Usuário logado: ${response.data.user?.username || user.usuario_sigma}`);
-            
-            // Aqui o robô aguarda a URL da lista de clientes para prosseguir
-            log(`⏳ Aguardando mapeamento da lista de clientes para disparar...`);
+            log(`✅ LOGIN REALIZADO COM SUCESSO!`);
+            log(`👤 Bem-vindo, ${response.data.user?.username || user.usuario_sigma}`);
+            log(`⏳ Próximo passo: Mapear a lista de clientes para disparar.`);
         }
 
     } catch (e) {
-        const erroMsg = e.response?.data?.message || e.message;
-        log(`❌ Falha no login do Sigma: ${erroMsg}`);
+        const status = e.response?.status;
+        const msgErro = e.response?.data?.message || e.message;
+
+        if (status === 404) {
+            log(`❌ Erro 404: O endereço da API não foi encontrado.`);
+            log(`💡 Verifique se a URL do painel está correta (ex: https://ufoplay.sigmab.pro)`);
+        } else {
+            log(`❌ Falha no login: ${msgErro}`);
+        }
     }
 }
 
 // ==========================================
-// 📱 CONEXÃO WHATSAPP (BAILEYS)
+// 📱 CONEXÃO WHATSAPP (BAILEYS - LEVE)
 // ==========================================
 async function startWhatsApp(userId) {
     if (activeClients[userId]) return;
@@ -106,7 +122,7 @@ async function startWhatsApp(userId) {
         version,
         auth: state,
         logger: pino({ level: 'silent' }),
-        printQRInTerminal: true
+        printQRInTerminal: false // Desativado para evitar poluição no terminal
     });
 
     sock.ev.on('creds.update', saveCreds);
@@ -156,7 +172,7 @@ app.get('/api/config', async (req, res) => {
 });
 
 // ==========================================
-// ⚡ SOCKET.IO
+// ⚡ COMUNICAÇÃO EM TEMPO REAL
 // ==========================================
 io.on('connection', (socket) => {
     socket.on('join_room', (userId) => {
@@ -172,4 +188,4 @@ io.on('connection', (socket) => {
     });
 });
 
-server.listen(3000, () => console.log("🚀 CH Logic (Ultra Leve) rodando na porta 3000"));
+server.listen(3000, () => console.log("🚀 CH Logic (Modo Sniper) na porta 3000"));
