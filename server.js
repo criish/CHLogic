@@ -44,17 +44,18 @@ async function dispararCobrancaSaaS(userId) {
     const log = (msg) => io.to(`room_${userId}`).emit('novo_log', `[${new Date().toLocaleTimeString()}] ${msg}`);
 
     if (!user || !user.cookie_sigma || !user.endpoint_clientes) {
-        return log("⚠️ Sistema aguardando Cookie e Endpoint. Sincronize no painel.");
+        return log("⚠️ Aguardando sincronização completa (Cookie + Clientes)...");
     }
 
     try {
-        log(`📡 Varrendo régua em: ${user.endpoint_clientes}`);
+        log(`📡 Iniciando varredura na régua...`);
         const response = await axios.get(`${user.endpoint_clientes}?page=1&limit=200`, {
-            headers: { 'Cookie': user.cookie_sigma, 'User-Agent': 'Mozilla/5.0' }
+            headers: { 'Cookie': user.cookie_sigma, 'User-Agent': 'Mozilla/5.0' },
+            timeout: 10000
         });
 
         const clientes = response.data.data || response.data.rows || response.data;
-        if (!Array.isArray(clientes)) return log("❌ Lista inválida.");
+        if (!Array.isArray(clientes)) return log("❌ Formato de lista inválido.");
 
         const regua = [-7, -5, -3, -1, 0, 1, 3, 5, 7];
         const hoje = new Date(); hoje.setHours(0,0,0,0);
@@ -73,45 +74,53 @@ async function dispararCobrancaSaaS(userId) {
                 count++;
             }
         });
-        log(`✅ Concluído: ${count} na régua.`);
-    } catch (e) { log(`❌ Erro: ${e.message}`); }
+        log(`✅ Varredura finalizada: ${count} encontrados.`);
+    } catch (e) { log(`❌ Erro na varredura: ${e.message}`); }
 }
 
 // ==========================================
-// 📱 WHATSAPP (ESTABILIDADE TOTAL)
+// 📱 WHATSAPP (FIX: SEM LOOP 405)
 // ==========================================
 async function startWhatsApp(userId) {
     if (activeClients[userId]) return;
 
+    console.log(`[ID ${userId}] Iniciando conexão com WhatsApp...`);
     const { state, saveCreds } = await useMultiFileAuthState(`auth_info_${userId}`);
+    const { version } = await fetchLatestBaileysVersion();
+
     const sock = makeWASocket({
+        version,
         auth: state,
         logger: pino({ level: 'silent' }),
-        printQRInTerminal: true // Mostra no Termius também para garantir
+        browser: ["CH Logic", "Chrome", "1.0.0"]
     });
 
     sock.ev.on('creds.update', saveCreds);
 
-    sock.ev.on('connection.update', (update) => {
+    sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect, qr } = update;
         
         if (qr) {
-            console.log(`[ID ${userId}] Gerando novo QR Code...`);
+            console.log(`[ID ${userId}] 📲 QR Code gerado!`);
             qrcode.toDataURL(qr).then(url => io.to(`room_${userId}`).emit('qr_code', url));
         }
 
         if (connection === 'open') {
             activeClients[userId] = sock;
-            console.log(`[ID ${userId}] ✅ WHATSAPP CONECTADO!`);
+            console.log(`[ID ${userId}] ✅ CONECTADO COM SUCESSO!`);
             io.to(`room_${userId}`).emit('status_update', { conectado: true });
         }
 
         if (connection === 'close') {
-            const code = lastDisconnect?.error?.output?.statusCode;
-            console.log(`[ID ${userId}] Conexão fechada. Código: ${code}`);
+            const reason = lastDisconnect?.error?.output?.statusCode;
+            console.log(`[ID ${userId}] Conexão fechada. Motivo: ${reason}`);
             delete activeClients[userId];
-            // Se não foi logout manual, tenta reconectar
-            if (code !== DisconnectReason.loggedOut) startWhatsApp(userId);
+
+            // Tenta reconectar apenas se não for logout manual, com delay de 5s
+            if (reason !== DisconnectReason.loggedOut) {
+                console.log(`[ID ${userId}] Tentando reconectar em 5 segundos...`);
+                setTimeout(() => startWhatsApp(userId), 5000);
+            }
         }
     });
 }
@@ -141,14 +150,13 @@ app.post('/api/login', async (req, res) => {
 
 app.get('/api/me', (req, res) => { if (req.session.userId) res.json({ id: req.session.userId }); else res.status(401).send(); });
 app.get('/api/config', async (req, res) => {
-    const c = await db.get('SELECT painel_url FROM users WHERE id = ?', [req.session.userId]);
+    const c = await db.get('SELECT painel_url FROM users WHERE id ?', [req.session.userId]);
     res.json(c || {});
 });
 
 io.on('connection', (socket) => {
     socket.on('join_room', (userId) => {
         socket.join(`room_${userId}`);
-        console.log(`[ID ${userId}] Cliente entrou no painel.`);
         startWhatsApp(userId);
     });
     socket.on('save_config', async (d) => {
