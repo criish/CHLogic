@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>CH Logic | Admin</title>
+    <style>
+        body { font-family: sans-serif; padding: 20px; background: #f4f4f4; }
+        .container { max-width: 800px; margin: auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        input { padding: 8px; margin-right: 10px; border: 1px solid #ccc; }
+        button { cursor: pointer; padding: 8px 15px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
+        th { background: #eee; }
+        .btn-off { background: #ff4444; color: white; border: none; }
+        .btn-on { background: #22c55e; color: white; border: none; }
+    </style>
+</head>
+<body>
+    <div id="login-admin" class="container">
+        <h2>Login Administrativo</h2>
+        <input type="text" id="adm_user" placeholder="Usuário Admin">
+        <input type="password" id="adm_pass" placeholder="Senha Admin">
+        <button onclick="loginAdmin()">Entrar</button>
+    </div>
+
+    <div id="painel-admin" class="container" style="display:none;">
+        <h2>Gerenciar Usuários</h2>
+        <div style="background: #eef; padding: 15px; margin-bottom: 20px;">
+            <h4>Novo Usuário</h4>
+            <input type="text" id="new_user" placeholder="Login do Cliente">
+            <input type="text" id="new_pass" placeholder="Senha do Cliente">
+            <button onclick="addUser()">Cadastrar Cliente</button>
+        </div>
+
+        <table>
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Usuário</th>
+                    <th>Status</th>
+                    <th>Ações</th>
+                </tr>
+            </thead>
+            <tbody id="user-list"></tbody>
+        </table>
+        <br>
+        <button onclick="location.reload()">Atualizar Lista</button>
+    </div>
+
+    <script>
+        async function loginAdmin() {
+            const user = document.getElementById('adm_user').value;
+            const pass = document.getElementById('adm_pass').value;
+            const res = await fetch('/api/admin/login', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({user, pass})
+            });
+            if (res.ok) {
+                document.getElementById('login-admin').style.display = 'none';
+                document.getElementById('painel-admin').style.display = 'block';
+                loadUsers();
+            } else { alert("Acesso negado"); }
+        }
+
+        async function loadUsers() {
+            const res = await fetch('/api/admin/users');
+            const users = await res.json();
+            const list = document.getElementById('user-list');
+            list.innerHTML = "";
+            users.forEach(u => {
+                list.innerHTML += `
+                    <tr>
+                        <td>${u.id}</td>
+                        <td>${u.username}</td>
+                        <td>${u.ativo ? "✅ Ativo" : "❌ Suspenso"}</td>
+                        <td>
+                            <button class="${u.ativo ? 'btn-off' : 'btn-on'}" onclick="toggleUser(${u.id}, ${u.ativo ? 0 : 1})">
+                                ${u.ativo ? "Desativar" : "Ativar"}
+                            </button>
+                        </td>
+                    </tr>
+                `;
+            });
+        }
+
+        async function addUser() {
+            const username = document.getElementById('new_user').value;
+            const password = document.getElementById('new_pass').value;
+            await fetch('/api/admin/users', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({username, password})
+            });
+            loadUsers();
+        }
+
+        async function toggleUser(id, ativo) {
+            await fetch('/api/admin/users/toggle', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({id, ativo})
+            });
+            loadUsers();
+        }
+    </script>
+</body>
+</html>

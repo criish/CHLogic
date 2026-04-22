@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Login | CH Logic</title>
+    <style>
+        body { background: #0f172a; color: white; font-family: 'Segoe UI', sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+        .card { background: #1e293b; padding: 2rem; border-radius: 1rem; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); width: 320px; }
+        input { width: 100%; padding: 0.75rem; margin: 0.5rem 0; border-radius: 0.5rem; border: 1px solid #334155; background: #0f172a; color: white; box-sizing: border-box; }
+        button { width: 100%; padding: 0.75rem; background: #22c55e; border: none; border-radius: 0.5rem; color: white; font-weight: bold; cursor: pointer; margin-top: 1rem; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h2 style="text-align: center; color: #22c55e;">CH LOGIC</h2>
+        <p style="text-align: center; font-size: 0.9rem; color: #94a3b8;">Acesse seu painel de automação</p>
+        <input type="text" id="user" placeholder="Usuário">
+        <input type="password" id="pass" placeholder="Senha">
+        <button onclick="login()">Entrar no Sistema</button>
+    </div>
+
+    <script>
+        async function login() {
+            const user = document.getElementById('user').value;
+            const pass = document.getElementById('pass').value;
+            const res = await fetch('/api/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ user, pass })
+            });
+            if (res.ok) window.location.href = '/';
+            else alert('Usuário ou senha inválidos!');
+        }
+    </script>
+</body>
+</html>

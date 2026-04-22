@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>CH Logic | Painel</title>
+    <style>
+        body { background: #0f172a; color: white; font-family: sans-serif; padding: 20px; }
+        .card { background: #1e293b; padding: 20px; border-radius: 10px; margin-bottom: 20px; }
+        .log-box { background: #000; color: #22c55e; padding: 15px; border-radius: 5px; height: 300px; overflow-y: auto; font-family: monospace; font-size: 0.85rem; }
+        input { width: 100%; padding: 10px; margin: 5px 0 15px 0; border-radius: 5px; border: 1px solid #334155; background: #0f172a; color: white; box-sizing: border-box; }
+        button { background: #22c55e; color: white; border: none; padding: 12px 25px; border-radius: 5px; cursor: pointer; font-weight: bold; width: 100%; }
+        .status-badge { display: inline-block; padding: 5px 10px; border-radius: 15px; font-size: 0.8rem; font-weight: bold; background: #334155; }
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+        <h1 id="welcome">Carregando...</h1>
+        <div id="status-sistema" class="status-badge">Aguardando Início</div>
+    </div>
+
+    <div class="card" id="whatsapp-card">
+        <p id="status-texto">Verificando conexão...</p>
+        <img id="qr-container" src="" style="display:none; margin: 0 auto; width: 200px; background: white; padding: 10px;">
+    </div>
+
+    <div class="card hidden" id="sigma-card">
+        <h3>Configurações Sigma</h3>
+        <input type="text" id="sigma_url" placeholder="URL do Painel Sigma">
+        <input type="text" id="sigma_user" placeholder="Usuário">
+        <input type="password" id="sigma_pass" placeholder="Senha">
+        <button onclick="salvarConfig()">Salvar e Iniciar Robo</button>
+    </div>
+
+    <div class="card">
+        <div class="log-box" id="log-area"><div>> Aguardando comandos...</div></div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        let currentUserId = null;
+        const socket = io();
+
+        // 1. Carrega identidade e preenche campos
+        fetch('/api/me').then(res => res.json()).then(user => {
+            currentUserId = user.id;
+            document.getElementById('welcome').innerText = `Olá, ${user.name}!`;
+            socket.emit('join_room', user.id);
+            carregarDadosSalvos();
+        });
+
+        // 2. Busca o que já está no banco de dados
+        function carregarDadosSalvos() {
+            fetch('/api/config').then(res => res.json()).then(data => {
+                if (data.painel_url) {
+                    document.getElementById('sigma_url').value = data.painel_url;
+                    document.getElementById('sigma_user').value = data.usuario_sigma;
+                    document.getElementById('sigma_pass').value = data.senha_sigma;
+                }
+            });
+        }
+
+        socket.on('qr_code', (img) => {
+            document.getElementById('qr-container').src = img;
+            document.getElementById('qr-container').style.display = 'block';
+            document.getElementById('status-texto').innerText = "Escaneie o QR Code:";
+        });
+
+        socket.on('status_update', (status) => {
+            if(status.conectado) {
+                document.getElementById('whatsapp-card').classList.add('hidden');
+                document.getElementById('sigma-card').classList.remove('hidden');
+                document.getElementById('status-sistema').innerText = "WhatsApp Online";
+            }
+        });
+
+        socket.on('config_salva', (res) => {
+            if(res.sucesso) {
+                document.getElementById('status-sistema').innerText = res.modoTeste ? "MODO TESTE" : "MODO REAL";
+                document.getElementById('status-sistema').style.background = res.modoTeste ? "#f59e0b" : "#22c55e";
+                alert('Configurações salvas no servidor!');
+            }
+        });
+
+        socket.on('novo_log', (msg) => {
+            const area = document.getElementById('log-area');
+            area.innerHTML += `<div>${msg}</div>`;
+            area.scrollTop = area.scrollHeight;
+        });
+
+        function salvarConfig() {
+            socket.emit('save_config', {
+                userId: currentUserId,
+                url: document.getElementById('sigma_url').value,
+                userSigma: document.getElementById('sigma_user').value,
+                passSigma: document.getElementById('sigma_pass').value
+            });
+        }
+    </script>
+</body>
+</html>
