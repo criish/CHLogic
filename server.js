@@ -87,60 +87,31 @@ function requireAdmin(req, res, next) {
 // ─────────────────────────────────────────────
 // Processa a régua de cobrança
 // ─────────────────────────────────────────────
-// ==========================================
-// 🚀 MOTOR DE EXTRAÇÃO COM RÉGUA INFINITA
-// ==========================================
-async function processarRégua(userId) {
-    const user = await db.get('SELECT * FROM users WHERE id = ?', [userId]);
-    const log = (msg) => io.to(`room_${userId}`).emit('novo_log', `[${new Date().toLocaleTimeString()}] ${msg}`);
+function processarRegua(userId, clientes) {
+    const regua = [-7, -5, -3, -1, 0, 1, 3, 5, 7];
+    const hoje = new Date();
+    hoje.setHours(0, 0, 0, 0);
+    let count = 0;
+    const naRegua = [];
 
-    if (!user || !user.auth_token || !user.endpoint_clientes) return;
-
-    try {
-        log("📡 Iniciando varredura na régua de cobrança...");
-        const response = await axios.get(`${user.endpoint_clientes}?perPage=500`, {
-            headers: { 
-                'Authorization': user.auth_token,
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            }
-        });
-
-        const clientes = response.data.data || response.data.rows || response.data;
-        if (!Array.isArray(clientes)) return log("❌ Formato de lista inválido.");
-
-        // Régua completa de dias positivos (a vencer)
-        const diasAVencer = [1, 2, 3, 4, 5, 6, 7];
-        const hoje = new Date(); hoje.setHours(0,0,0,0);
-        let count = 0;
-
-        clientes.forEach(c => {
-            const exp = c.expiration || c.expiry;
-            if (!exp) return;
-            
-            const dtVenc = new Date(exp); dtVenc.setHours(0,0,0,0);
+    clientes.forEach((c) => {
+        const exp = c.expiration || c.expiry || c.expires_at || c.vencimento || c.due_date || c.expiryDate;
+        if (exp) {
+            const dtVenc = new Date(exp);
+            dtVenc.setHours(0, 0, 0, 0);
             const diffDays = Math.ceil((dtVenc - hoje) / (1000 * 60 * 60 * 24));
-
-            // LOGICA: 
-            // 1. Se diffDays for 0 (Vence hoje)
-            // 2. Se diffDays estiver entre 1 e 7 (Régua de aviso)
-            // 3. Se diffDays for negativo (Atrasado - Cobrança Infinita)
-            if (diffDays <= 7) { 
-                const nome = c.notes || c.name || c.username || "Cliente";
-                const zap = c.whatsapp?.replace(/\D/g, '') || c.phone?.replace(/\D/g, '');
-                
-                let status = "";
-                if (diffDays === 0) status = "🔥 VENCE HOJE";
-                else if (diffDays > 0) status = `📅 A VENCER (Dia ${diffDays})`;
-                else status = `⚠️ ATRASADO (HÁ ${Math.abs(diffDays)} DIAS)`;
-
-                log(`📍 [${status}] ${nome} | Zap: ${zap}`);
+            if (regua.includes(diffDays)) {
+                const nome = c.notes || c.name || c.username || 'Sem nome';
+                const zap = c.whatsapp || c.phone || c.telefone || c.mobile || 'N/A';
+                emitLog(userId, `📍 [DIA ${diffDays > 0 ? '+' : ''}${diffDays}] ${nome} | Zap: ${zap}`);
+                naRegua.push({ nome, zap, diffDays });
                 count++;
             }
-        });
-        log(`✅ Varredura finalizada: ${count} clientes identificados na régua.`);
-    } catch (e) { 
-        log(`❌ Erro na varredura: ${e.message}`); 
-    }
+        }
+    });
+
+    emitLog(userId, `🏆 Varredura finalizada. ${count} cliente(s) na régua.`);
+    return naRegua;
 }
 
 // ─────────────────────────────────────────────
