@@ -36,26 +36,28 @@ app.use(express.json());
 app.use(express.static('public'));
 
 // ==========================================
-// 🚀 MOTOR DE EXTRAÇÃO
+// 🚀 MOTOR DE EXTRAÇÃO (RÉGUA)
 // ==========================================
 async function dispararCobrancaSaaS(userId) {
     const user = await db.get('SELECT * FROM users WHERE id = ?', [userId]);
-    const sock = activeClients[userId];
     const log = (msg) => io.to(`room_${userId}`).emit('novo_log', `[${new Date().toLocaleTimeString()}] ${msg}`);
 
     if (!user || !user.cookie_sigma || !user.endpoint_clientes) {
-        return log("⚠️ Aguardando sincronização completa (Cookie + Clientes)...");
+        return log("⚠️ Sistema aguardando Cookie e Endpoint. Sincronize no painel.");
     }
 
     try {
-        log(`📡 Iniciando varredura na régua...`);
+        log(`📡 Iniciando varredura na régua de cobrança...`);
         const response = await axios.get(`${user.endpoint_clientes}?page=1&limit=200`, {
-            headers: { 'Cookie': user.cookie_sigma, 'User-Agent': 'Mozilla/5.0' },
-            timeout: 10000
+            headers: { 
+                'Cookie': user.cookie_sigma, 
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' 
+            },
+            timeout: 15000
         });
 
         const clientes = response.data.data || response.data.rows || response.data;
-        if (!Array.isArray(clientes)) return log("❌ Formato de lista inválido.");
+        if (!Array.isArray(clientes)) return log("❌ Formato de lista de clientes inválido.");
 
         const regua = [-7, -5, -3, -1, 0, 1, 3, 5, 7];
         const hoje = new Date(); hoje.setHours(0,0,0,0);
@@ -64,27 +66,58 @@ async function dispararCobrancaSaaS(userId) {
         clientes.forEach(c => {
             const exp = c.expiration || c.expiry;
             if (!exp) return;
+            
             const dtVenc = new Date(exp); dtVenc.setHours(0,0,0,0);
             const diffDays = Math.ceil((dtVenc - hoje) / (1000 * 60 * 60 * 24));
 
             if (regua.includes(diffDays)) {
-                const nome = c.notes || c.name || "Cliente";
+                const nome = c.notes || c.name || c.username || "Cliente";
                 const zap = c.whatsapp?.replace(/\D/g, '') || c.phone?.replace(/\D/g, '');
-                log(`📍 [DIA ${diffDays}] ${nome} | Zap: ${zap}`);
+                
+                let status = diffDays === 0 ? "🔥 VENCE HOJE" : (diffDays < 0 ? "⚠️ ATRASADO" : "📅 A VENCER");
+                log(`📍 [DIA ${diffDays}] ${status} | ${nome} | Zap: ${zap}`);
                 count++;
             }
         });
-        log(`✅ Varredura finalizada: ${count} encontrados.`);
-    } catch (e) { log(`❌ Erro na varredura: ${e.message}`); }
+        log(`✅ Varredura finalizada: ${count} clientes identificados.`);
+    } catch (e) { 
+        log(`❌ Erro na varredura: ${e.message}`); 
+    }
 }
 
 // ==========================================
-// 📱 WHATSAPP (FIX: SEM LOOP 405)
+// 🔑 ROTAS DE SINCRONIZAÇÃO
+// ==========================================
+app.post('/api/sync-cookie', async (req, res) => {
+    const { userId, cookie } = req.body;
+    const id = userId || 1;
+    await db.run('UPDATE users SET cookie_sigma = ? WHERE id = ?', [cookie, id]);
+    
+    console.log(`[ID ${id}] 🔑 Cookie recebido e salvo!`);
+    io.to(`room_${id}`).emit('novo_log', `[${new Date().toLocaleTimeString()}] 🔑 Cookie sincronizado com sucesso!`);
+    
+    dispararCobrancaSaaS(id);
+    res.json({ success: true });
+});
+
+app.post('/api/sync-endpoint', async (req, res) => {
+    const { userId, fullUrl } = req.body;
+    const id = userId || 1;
+    if (fullUrl.includes('/api/customers')) {
+        const clean = fullUrl.split('?')[0];
+        await db.run('UPDATE users SET endpoint_clientes = ? WHERE id = ?', [clean, id]);
+        console.log(`[ID ${id}] 🎯 API DETECTADA: ${clean}`);
+        io.to(`room_${id}`).emit('novo_log', `🎯 API de Clientes Detectada: ${clean}`);
+    }
+    res.json({ success: true });
+});
+
+// ==========================================
+// 📱 WHATSAPP (BAILEYS)
 // ==========================================
 async function startWhatsApp(userId) {
     if (activeClients[userId]) return;
 
-    console.log(`[ID ${userId}] Iniciando conexão com WhatsApp...`);
     const { state, saveCreds } = await useMultiFileAuthState(`auth_info_${userId}`);
     const { version } = await fetchLatestBaileysVersion();
 
@@ -97,28 +130,23 @@ async function startWhatsApp(userId) {
 
     sock.ev.on('creds.update', saveCreds);
 
-    sock.ev.on('connection.update', async (update) => {
+    sock.ev.on('connection.update', (update) => {
         const { connection, lastDisconnect, qr } = update;
         
         if (qr) {
-            console.log(`[ID ${userId}] 📲 QR Code gerado!`);
             qrcode.toDataURL(qr).then(url => io.to(`room_${userId}`).emit('qr_code', url));
         }
 
         if (connection === 'open') {
             activeClients[userId] = sock;
-            console.log(`[ID ${userId}] ✅ CONECTADO COM SUCESSO!`);
+            console.log(`[ID ${userId}] ✅ WHATSAPP CONECTADO!`);
             io.to(`room_${userId}`).emit('status_update', { conectado: true });
         }
 
         if (connection === 'close') {
             const reason = lastDisconnect?.error?.output?.statusCode;
-            console.log(`[ID ${userId}] Conexão fechada. Motivo: ${reason}`);
             delete activeClients[userId];
-
-            // Tenta reconectar apenas se não for logout manual, com delay de 5s
             if (reason !== DisconnectReason.loggedOut) {
-                console.log(`[ID ${userId}] Tentando reconectar em 5 segundos...`);
                 setTimeout(() => startWhatsApp(userId), 5000);
             }
         }
@@ -126,32 +154,24 @@ async function startWhatsApp(userId) {
 }
 
 // ==========================================
-// 🔑 ROTAS
+// 🔑 ROTAS DE LOGIN E CONFIG
 // ==========================================
-app.post('/api/sync-cookie', async (req, res) => {
-    await db.run('UPDATE users SET cookie_sigma = ? WHERE id = 1', [req.body.cookie]);
-    dispararCobrancaSaaS(1);
-    res.json({ success: true });
-});
-
-app.post('/api/sync-endpoint', async (req, res) => {
-    if (req.body.fullUrl.includes('/api/customers')) {
-        const clean = req.body.fullUrl.split('?')[0];
-        await db.run('UPDATE users SET endpoint_clientes = ? WHERE id = 1', [clean]);
-        io.to(`room_1`).emit('novo_log', `🎯 API Detectada: ${clean}`);
-    }
-    res.json({ success: true });
-});
-
 app.post('/api/login', async (req, res) => {
     const row = await db.get('SELECT * FROM users WHERE username = ? AND password = ?', [req.body.user, req.body.pass]);
-    if (row) { req.session.userId = row.id; res.json({ success: true }); } else res.status(401).send();
+    if (row) { req.session.userId = row.id; res.json({ success: true }); } 
+    else res.status(401).send();
 });
 
-app.get('/api/me', (req, res) => { if (req.session.userId) res.json({ id: req.session.userId }); else res.status(401).send(); });
+app.get('/api/me', (req, res) => { 
+    if (req.session.userId) res.json({ id: req.session.userId }); 
+    else res.status(401).send(); 
+});
+
 app.get('/api/config', async (req, res) => {
-    const c = await db.get('SELECT painel_url FROM users WHERE id ?', [req.session.userId]);
-    res.json(c || {});
+    if (!req.session.userId) return res.status(401).send();
+    // CORREÇÃO SQL AQUI: Adicionado "="
+    const config = await db.get('SELECT painel_url FROM users WHERE id = ?', [req.session.userId]);
+    res.json(config || {});
 });
 
 io.on('connection', (socket) => {
