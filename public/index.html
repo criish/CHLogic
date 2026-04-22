@@ -8,142 +8,65 @@
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: 'Segoe UI', sans-serif; background: #0f1117; color: #e0e0e0; min-height: 100vh; }
-
-        header {
-            background: #161b27;
-            padding: 14px 32px;
-            border-bottom: 1px solid #1e2535;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-        }
-        .header-left { display: flex; align-items: center; gap: 12px; }
+        header { background: #161b27; padding: 14px 32px; border-bottom: 1px solid #1e2535; display: flex; align-items: center; justify-content: space-between; }
         header h1 { font-size: 1.1rem; font-weight: 700; color: #fff; }
-        .badge { background: #00c896; color: #000; font-size: 0.65rem; font-weight: 700; padding: 2px 8px; border-radius: 20px; }
-        .header-right { display: flex; align-items: center; gap: 20px; }
-        .user-info { font-size: 0.85rem; color: #8b949e; }
-        .btn-logout { background: transparent; border: 1px solid #30363d; color: #f85149; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 0.8rem; transition: 0.2s; }
-        .btn-logout:hover { background: #f85149; color: #fff; }
-
+        .badge { background: #00c896; color: #000; font-size: 0.65rem; font-weight: 700; padding: 2px 8px; border-radius: 20px; margin-left: 10px; }
+        .btn-logout { background: transparent; border: 1px solid #30363d; color: #f85149; padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 0.8rem; }
         main { padding: 32px; max-width: 1400px; margin: 0 auto; display: grid; grid-template-columns: 350px 1fr; gap: 32px; }
-
         .card { background: #161b27; border: 1px solid #1e2535; border-radius: 12px; padding: 24px; }
-        .card-title { font-size: 0.9rem; font-weight: 600; color: #8b949e; margin-bottom: 20px; display: flex; align-items: center; gap: 8px; }
-        
+        .card-title { font-size: 0.9rem; font-weight: 600; color: #8b949e; margin-bottom: 20px; display: flex; align-items: center; justify-content: space-between; }
         .form-group { margin-bottom: 20px; }
-        label { display: block; font-size: 0.75rem; color: #8b949e; margin-bottom: 8px; text-transform: uppercase; letter-spacing: 0.5px; }
-        input { width: 100%; background: #0f1117; border: 1px solid #30363d; padding: 12px; border-radius: 8px; color: #fff; font-size: 0.9rem; outline: none; transition: 0.2s; }
-        input:focus { border-color: #00c896; }
-
-        .btn-primary { width: 100%; background: #00c896; color: #000; border: none; padding: 12px; border-radius: 8px; font-weight: 600; cursor: pointer; transition: 0.2s; margin-bottom: 12px; }
-        .btn-primary:hover { background: #00ad82; transform: translateY(-1px); }
-        .btn-secondary { width: 100%; background: #21262d; color: #c9d1d9; border: 1px solid #30363d; padding: 12px; border-radius: 8px; font-weight: 600; cursor: pointer; transition: 0.2s; }
-        .btn-secondary:hover { background: #30363d; }
-
-        .status-container { margin-top: 24px; padding-top: 24px; border-top: 1px solid #1e2535; }
-        .status-item { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; font-size: 0.85rem; }
-        .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; }
-        .status-on { background: #00c896; box-shadow: 0 0 10px rgba(0,200,150,0.3); }
+        label { display: block; font-size: 0.75rem; color: #8b949e; margin-bottom: 8px; }
+        input { width: 100%; background: #0f1117; border: 1px solid #30363d; padding: 12px; border-radius: 8px; color: #fff; outline: none; }
+        .btn-primary { width: 100%; background: #00c896; color: #000; border: none; padding: 12px; border-radius: 8px; font-weight: 600; cursor: pointer; margin-bottom: 12px; }
+        .btn-secondary { width: 100%; background: #21262d; color: #c9d1d9; border: 1px solid #30363d; padding: 12px; border-radius: 8px; font-weight: 600; cursor: pointer; }
+        .log-box { height: 400px; background: #0d1117; border: 1px solid #1e2535; border-radius: 8px; padding: 16px; font-family: monospace; overflow-y: auto; color: #a5d6ff; }
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 5px; }
+        .status-on { background: #00c896; }
         .status-off { background: #f85149; }
-
-        .console-container { display: flex; flex-direction: column; height: 600px; }
-        .console-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
-        .log-box { flex: 1; background: #0d1117; border: 1px solid #1e2535; border-radius: 8px; padding: 16px; font-family: 'Consolas', monospace; font-size: 0.85rem; overflow-y: auto; color: #a5d6ff; line-height: 1.6; }
-        .log-line { margin-bottom: 4px; display: flex; gap: 8px; }
-        .log-line.info { color: #58a6ff; }
-        .log-line.success { color: #3fb950; }
-        .log-line.warn { color: #d29922; }
         
-        .console-footer { margin-top: 16px; display: flex; gap: 12px; }
-        .btn-tool { background: transparent; border: 1px solid #30363d; color: #8b949e; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 0.75rem; }
-        .btn-tool:hover { border-color: #8b949e; color: #fff; }
-
-        /* MODAL WHATSAPP */
+        /* MODAL */
         .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); z-index: 1000; align-items: center; justify-content: center; }
         .modal { background: #161b27; border: 1px solid #1e2535; border-radius: 12px; width: 400px; padding: 24px; text-align: center; }
-        #qrDisplay { background: #fff; width: 250px; height: 250px; margin: 20px auto; border-radius: 8px; display: flex; align-items: center; justify-content: center; }
+        #qrDisplay { background: #fff; width: 220px; height: 220px; margin: 20px auto; display: flex; align-items: center; justify-content: center; border-radius: 8px; }
         #qrDisplay img { width: 90%; }
-        .pairing-section { margin-top: 15px; border-top: 1px solid #1e2535; padding-top: 15px; }
-        #pairingCodeDisplay { font-size: 1.5rem; letter-spacing: 5px; color: #00c896; font-weight: bold; margin: 10px 0; }
+        #pairingCodeDisplay { font-size: 1.8rem; color: #00c896; letter-spacing: 5px; font-weight: bold; margin: 15px 0; }
     </style>
 </head>
 <body>
-
     <header>
-        <div class="header-left">
-            <h1>CH LOGIC</h1>
-            <span class="badge">ULTRA V2</span>
-        </div>
-        <div class="header-right">
-            <span class="user-info" id="userDisplay">...</span>
-            <button class="btn-logout" onclick="logout()">Sair</button>
-        </div>
+        <div><h1>CH LOGIC <span class="badge">ULTRA V2</span></h1></div>
+        <div><span id="userDisplay" style="margin-right:15px; font-size:0.8rem"></span><button class="btn-logout" onclick="location.href='/login.html'">Sair</button></div>
     </header>
-
     <main>
         <aside>
             <div class="card">
                 <div class="card-title">⚙️ CONFIGURAÇÕES</div>
-                
-                <div class="form-group">
-                    <label>URL do Painel Sigma</label>
-                    <input type="text" id="sigmaUrl" placeholder="https://seu-painel.sigmab.pro">
-                </div>
-
-                <div class="form-group">
-                    <label>Horário de Cobrança</label>
-                    <input type="time" id="horarioCobranca">
-                </div>
-
+                <div class="form-group"><label>URL DO PAINEL SIGMA</label><input type="text" id="sigmaUrl"></div>
+                <div class="form-group"><label>HORÁRIO DE COBRANÇA</label><input type="time" id="horarioCobranca"></div>
                 <button class="btn-primary" onclick="salvarConfig()">Salvar e Sincronizar</button>
-                <button class="btn-secondary" onclick="conectarWhatsApp()">Conectar WhatsApp</button>
-
-                <div class="status-container">
-                    <div class="status-item">
-                        <span>WhatsApp</span>
-                        <span id="statusZap"><span class="status-dot status-off"></span>Desconectado</span>
-                    </div>
-                    <div class="status-item">
-                        <span>Sessão Sigma</span>
-                        <span id="statusSigma"><span class="status-dot status-off"></span>Inativo</span>
-                    </div>
+                <button class="btn-secondary" onclick="abrirModalZap()">Conectar WhatsApp</button>
+                <div style="margin-top:20px; font-size:0.8rem">
+                    <p>WhatsApp: <span id="statusZap"><span class="status-dot status-off"></span>Off</span></p>
                 </div>
             </div>
         </aside>
-
         <section>
-            <div class="card console-container">
-                <div class="console-header">
-                    <div class="card-title" style="margin-bottom:0">🚀 LOGS DO SISTEMA</div>
-                    <button class="btn-primary" style="width:auto; padding: 6px 16px; margin-bottom:0" onclick="rodarAgora()">Varrer Agora</button>
-                </div>
-                <div class="log-box" id="logBox">
-                    <div class="log-line">> Aguardando comandos...</div>
-                </div>
-                <div class="console-footer">
-                    <button class="btn-tool" onclick="limparLog()">Limpar</button>
-                    <button class="btn-tool" onclick="exportarLog()">Exportar Log</button>
-                </div>
+            <div class="card">
+                <div class="card-title">🚀 LOGS DO SISTEMA <button class="btn-secondary" style="width:auto; padding:5px 15px" onclick="addLog('Varredura manual...')">Varrer Agora</button></div>
+                <div class="log-box" id="logBox"></div>
             </div>
         </section>
     </main>
 
     <div class="modal-overlay" id="modalZap">
         <div class="modal">
-            <div class="card-title" style="justify-content: space-between;">
-                <span>🔗 CONEXÃO WHATSAPP</span>
-                <span style="cursor:pointer" onclick="fecharModalZap()">✖</span>
-            </div>
-            
-            <p style="font-size: 0.8rem; color: #8b949e; margin-bottom: 10px;">Escaneie o QR Code abaixo:</p>
-            <div id="qrDisplay">
-                <p style="color: #000; font-size: 0.7rem;">Aguardando QR Code...</p>
-            </div>
-
-            <div class="pairing-section">
-                <label>Ou conecte via número (com DDD)</label>
-                <input type="text" id="phonePairing" placeholder="5511999999999" style="margin-bottom: 10px;">
-                <button class="btn-tool" style="width: 100%;" onclick="gerarCodigoPareamento()">Gerar Código</button>
+            <div class="card-title"><span>CONEXÃO WHATSAPP</span> <span style="cursor:pointer" onclick="fecharModalZap()">✖</span></div>
+            <div id="qrDisplay"><p style="color:#000; font-size:0.7rem">Aguardando QR...</p></div>
+            <div style="border-top:1px solid #30363d; padding-top:15px; margin-top:15px">
+                <label>OU VIA NÚMERO (COM DDD)</label>
+                <input type="text" id="phonePairing" placeholder="5519..." style="margin:10px 0">
+                <button class="btn-secondary" onclick="gerarCodigo()">Gerar Código</button>
                 <div id="pairingCodeDisplay"></div>
             </div>
         </div>
@@ -151,98 +74,32 @@
 
     <script>
         const socket = io();
-        let userId = null;
-
         socket.on('connect', () => {
-            fetch('/api/me').then(r => r.json()).then(data => {
-                userId = data.id;
-                document.getElementById('userDisplay').textContent = `ID: ${userId}`;
-                socket.emit('join_room', userId);
+            fetch('/api/me').then(r => r.json()).then(user => {
+                document.getElementById('userDisplay').textContent = `ID: ${user.id}`;
+                socket.emit('join_room', user.id);
             });
         });
-
-        socket.on('novo_log', (msg) => addLog(msg));
-        
-        socket.on('qr_code', (url) => {
-            const display = document.getElementById('qrDisplay');
-            display.innerHTML = `<img src="${url}">`;
+        socket.on('qr_code', (url) => { document.getElementById('qrDisplay').innerHTML = `<img src="${url}">`; });
+        socket.on('pairing_code', (c) => { document.getElementById('pairingCodeDisplay').textContent = c; });
+        socket.on('novo_log', (m) => addLog(m));
+        socket.on('status_update', (d) => {
+            document.getElementById('statusZap').innerHTML = d.conectado ? '<span class="status-dot status-on"></span>On' : '<span class="status-dot status-off"></span>Off';
+            if(d.conectado) fecharModalZap();
         });
-
-        socket.on('pairing_code', (code) => {
-            document.getElementById('pairingCodeDisplay').textContent = code;
-            addLog(`🔑 Código de pareamento gerado: ${code}`, 'log-line success');
-        });
-
-        socket.on('status_update', (data) => {
-            const zap = document.getElementById('statusZap');
-            if(data.conectado) {
-                zap.innerHTML = '<span class="status-dot status-on"></span>Conectado';
-                fecharModalZap();
-            } else {
-                zap.innerHTML = '<span class="status-dot status-off"></span>Desconectado';
-            }
-        });
-
-        async function salvarConfig() {
+        function abrirModalZap() { document.getElementById('modalZap').style.display = 'flex'; }
+        function fecharModalZap() { document.getElementById('modalZap').style.display = 'none'; }
+        function gerarCodigo() { socket.emit('request_pairing_code', { numero: document.getElementById('phonePairing').value }); }
+        function salvarConfig() {
             const url = document.getElementById('sigmaUrl').value;
             const horario = document.getElementById('horarioCobranca').value;
-            if(!url) return alert('Insira a URL do Painel');
-            
-            addLog('💾 Salvando configurações...', 'log-line info');
-            socket.emit('save_config', { userId, url, horario });
-            addLog('🕒 Abrindo painel Sigma...', 'log-line info');
-            addLog('👉 Faça login e clique em Clientes para sincronizar.', 'log-line warn');
+            socket.emit('save_config', { url, horario });
         }
-
-        socket.on('open_sigma_tab', (data) => {
-            window.open(data.url, '_blank');
-        });
-
-        function conectarWhatsApp() {
-            document.getElementById('modalZap').style.display = 'flex';
-            addLog('📱 Abrindo interface de conexão WhatsApp...', 'log-line info');
-        }
-
-        function fecharModalZap() {
-            document.getElementById('modalZap').style.display = 'none';
-        }
-
-        function gerarCodigoPareamento() {
-            const num = document.getElementById('phonePairing').value;
-            if(!num) return alert("Digite o número com DDD (ex: 5519...)");
-            socket.emit('request_pairing_code', { numero: num });
-            addLog(`⏳ Solicitando código para ${num}...`);
-        }
-
-        async function rodarAgora() {
-            addLog('▶️ Iniciando varredura manual...', 'log-line info');
-            socket.emit('manual_scan', { userId });
-        }
-
-        async function logout() {
-            window.location.href = '/login.html';
-        }
-
-        function addLog(msg, cls = 'log-line') {
-            const box = document.getElementById('logBox');
-            const div = document.createElement('div');
-            div.className = cls;
-            div.textContent = '> ' + msg;
-            box.appendChild(div);
-            box.scrollTop = box.scrollHeight;
-        }
-
-        function limparLog() {
-            document.getElementById('logBox').innerHTML = '<div class="log-line info">> Log limpo.</div>';
-        }
-
-        function exportarLog() {
-            const linhas = [...document.querySelectorAll('#logBox div')].map(d => d.textContent).join('\n');
-            const blob = new Blob([linhas], { type: 'text/plain' });
-            const a = document.createElement('a');
-            a.href = URL.createObjectURL(blob);
-            a.download = `log_${new Date().getTime()}.txt`;
-            a.click();
+        socket.on('open_sigma_tab', (d) => { window.open(d.url, '_blank'); });
+        function addLog(m) {
+            const b = document.getElementById('logBox');
+            const d = document.createElement('div'); d.textContent = `> ${m}`;
+            b.appendChild(d); b.scrollTop = b.scrollHeight;
         }
     </script>
 </body>
