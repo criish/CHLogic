@@ -56,7 +56,7 @@ async function processarDadosSigma(userId) {
         const baseUrl = new URL(user.endpoint_clientes).origin;
 
         // CORREÇÃO 4: Headers mais completos para evitar bloqueio do Sigma
-        const response = await axios.get(`${user.endpoint_clientes}?page=1&limit=500`, {
+        const response = await axios.get(`${user.endpoint_clientes}?page=1&per_page=500&limit=500&order=id&sort=asc`, {
             headers: {
                 'Cookie': user.cookie_sigma,
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
