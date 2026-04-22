@@ -12,11 +12,8 @@ const server = http.createServer(app);
 const io = new Server(server);
 
 app.use(cors());
-
-// CORREÇÃO 1: Limite aumentado para 50mb (resolve o PayloadTooLargeError)
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
-
 app.use(express.static('public'));
 
 let db;
@@ -41,6 +38,49 @@ let db;
 
 app.use(session({ secret: 'CH_SNIPER_2026', resave: false, saveUninitialized: false }));
 
+// ─────────────────────────────────────────────
+// CORREÇÃO 1: Debounce — evita loop de requisições
+// ─────────────────────────────────────────────
+const timers = {};
+function processarComDebounce(userId) {
+    if (timers[userId]) clearTimeout(timers[userId]);
+    timers[userId] = setTimeout(() => processarDadosSigma(userId), 1500);
+}
+
+// ─────────────────────────────────────────────
+// CORREÇÃO 2: Filtro de cookie — envia só o que o Sigma precisa
+// O Cloudflare rejeita headers > ~8KB. A extensão captura TODOS
+// os cookies do navegador. Aqui filtramos apenas os de sessão/auth.
+// ─────────────────────────────────────────────
+function filtrarCookieSigma(cookieRaw) {
+    if (!cookieRaw) return '';
+
+    const relevantes = [
+        'sigma', 'session', 'token', 'auth', 'login',
+        'user', 'remember', 'jwt', 'laravel', 'xsrf',
+        'csrf', 'bearer', 'access', 'refresh', 'sid'
+    ];
+
+    const filtrado = cookieRaw
+        .split(';')
+        .map(c => c.trim())
+        .filter(c => {
+            const nome = c.split('=')[0].toLowerCase().trim();
+            return relevantes.some(r => nome.includes(r));
+        })
+        .join('; ');
+
+    // Fallback: se filtro zerar tudo, pega os primeiros 5 cookies
+    if (!filtrado) {
+        return cookieRaw.split(';').slice(0, 5).join('; ').trim();
+    }
+
+    return filtrado;
+}
+
+// ─────────────────────────────────────────────
+// CORE: Varredura de clientes no Sigma
+// ─────────────────────────────────────────────
 async function processarDadosSigma(userId) {
     const user = await db.get('SELECT * FROM users WHERE id = ?', [userId]);
     const log = (msg) => io.to(`room_${userId}`).emit('novo_log', `[${new Date().toLocaleTimeString()}] ${msg}`);
@@ -50,15 +90,22 @@ async function processarDadosSigma(userId) {
     if (!user.cookie_sigma) return log("⏳ Aguardando Cookie (Verifique se a extensão está instalada)...");
     if (!user.endpoint_clientes) return log("⏳ Aguardando Rota (Clique em 'Clientes' no Sigma)...");
 
+    const cookieFiltrado = filtrarCookieSigma(user.cookie_sigma);
+
+    if (!cookieFiltrado) {
+        return log('❌ Nenhum cookie de sessão válido encontrado. Faça login no Sigma novamente.');
+    }
+
+    log(`🧹 Cookie filtrado OK (${cookieFiltrado.length} bytes)`);
+
     try {
-        log(`📡 Iniciando extração oficial em: ${user.endpoint_clientes}`);
+        log(`📡 Iniciando extração em: ${user.endpoint_clientes}`);
 
         const baseUrl = new URL(user.endpoint_clientes).origin;
 
-        // CORREÇÃO 4: Headers mais completos para evitar bloqueio do Sigma
-        const response = await axios.get(`${user.endpoint_clientes}?page=1&per_page=500&limit=500&order=id&sort=asc`, {
+        const response = await axios.get(`${user.endpoint_clientes}?page=1&per_page=500&limit=500`, {
             headers: {
-                'Cookie': user.cookie_sigma,
+                'Cookie': cookieFiltrado,
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
                 'Referer': `${baseUrl}/`,
                 'Origin': baseUrl,
@@ -72,41 +119,64 @@ async function processarDadosSigma(userId) {
             timeout: 15000
         });
 
-        const clientes = response.data.data || response.data.rows || (Array.isArray(response.data) ? response.data : null);
+        const clientes = response.data.data
+            || response.data.rows
+            || response.data.customers
+            || (Array.isArray(response.data) ? response.data : null);
 
         if (clientes && Array.isArray(clientes)) {
             log(`✅ SUCESSO! ${clientes.length} clientes carregados.`);
+
             const regua = [-7, -5, -3, -1, 0, 1, 3, 5, 7];
-            const hoje = new Date(); hoje.setHours(0, 0, 0, 0);
+            const hoje = new Date();
+            hoje.setHours(0, 0, 0, 0);
             let count = 0;
 
             clientes.forEach((c) => {
-                const exp = c.expiration || c.expiry || c.expires_at || c.vencimento;
+                const exp = c.expiration || c.expiry || c.expires_at || c.vencimento || c.due_date;
                 if (exp) {
-                    const dtVenc = new Date(exp); dtVenc.setHours(0, 0, 0, 0);
+                    const dtVenc = new Date(exp);
+                    dtVenc.setHours(0, 0, 0, 0);
                     const diffDays = Math.ceil((dtVenc - hoje) / (1000 * 60 * 60 * 24));
                     if (regua.includes(diffDays)) {
-                        log(`📍 [DIA ${diffDays}] ${c.notes || c.name || c.username} | Zap: ${c.whatsapp || c.phone || c.telefone || 'N/A'}`);
+                        const nome = c.notes || c.name || c.username || 'Sem nome';
+                        const zap = c.whatsapp || c.phone || c.telefone || 'N/A';
+                        log(`📍 [DIA ${diffDays > 0 ? '+' : ''}${diffDays}] ${nome} | Zap: ${zap}`);
                         count++;
                     }
                 }
             });
-            log(`🏆 Varredura finalizada. ${count} clientes encontrados na régua.`);
+
+            log(`🏆 Varredura finalizada. ${count} cliente(s) encontrado(s) na régua.`);
         } else {
-            log(`⚠️ Resposta recebida mas formato inesperado. Verifique o endpoint.`);
+            log(`⚠️ Resposta recebida mas formato inesperado.`);
+            log(`🔍 Chaves recebidas: ${Object.keys(response.data || {}).join(', ')}`);
         }
+
     } catch (e) {
-    const status = e.response?.status;
-    const body = JSON.stringify(e.response?.data || {});
-    const sentHeaders = JSON.stringify(e.config?.headers || {});
+        const status = e.response?.status;
+        const body = String(e.response?.data || '').substring(0, 200);
 
-    log(`❌ Erro ${status || e.message}`);
-    log(`📋 Resposta do servidor: ${body.substring(0, 300)}`);
-    log(`📤 Headers enviados: ${sentHeaders.substring(0, 300)}`);
-}
+        if (status === 400) {
+            log(`❌ Erro 400: Header ainda muito grande ou requisição inválida.`);
+            log(`📋 Detalhe: ${body}`);
+        } else if (status === 401) {
+            log(`❌ Erro 401: Cookie expirado. Reabra o Sigma para renovar.`);
+        } else if (status === 403) {
+            log(`❌ Erro 403: Acesso negado. Verifique permissões do usuário no Sigma.`);
+        } else if (status === 404) {
+            log(`❌ Erro 404: Endpoint não encontrado. Clique em 'Clientes' no Sigma novamente.`);
+        } else {
+            log(`❌ Erro: ${status || e.message}`);
+            log(`📋 Detalhe: ${body}`);
+        }
+    }
 }
 
-// CORREÇÃO 2: Proteção contra cookie vazio (evita sobrescrita acidental)
+// ─────────────────────────────────────────────
+// ROTAS
+// ─────────────────────────────────────────────
+
 app.post('/api/sync-cookie', async (req, res) => {
     const cookie = req.body.cookie;
 
@@ -116,11 +186,10 @@ app.post('/api/sync-cookie', async (req, res) => {
 
     await db.run('UPDATE users SET cookie_sigma = ? WHERE id = 1', [cookie.trim()]);
     io.to('room_1').emit('novo_log', `[${new Date().toLocaleTimeString()}] 🔑 Cookie sincronizado com sucesso!`);
-    processarDadosSigma(1);
+    processarComDebounce(1);
     res.json({ success: true });
 });
 
-// CORREÇÃO 3: Filtro cirúrgico de endpoint (só aceita rotas de clientes)
 app.post('/api/sync-endpoint', async (req, res) => {
     const fullUrl = req.body.fullUrl || '';
 
@@ -128,7 +197,6 @@ app.post('/api/sync-endpoint', async (req, res) => {
         return res.json({ success: false, reason: 'URL vazia' });
     }
 
-    // Aceita apenas URLs que correspondem à rota de listagem de clientes
     const isValid = /\/(customers|clientes|clients|usuarios|users|membros)(\/|$|\?)/i.test(fullUrl);
     if (!isValid) {
         return res.json({ success: false, reason: 'Endpoint ignorado (não é rota de clientes)' });
@@ -137,7 +205,7 @@ app.post('/api/sync-endpoint', async (req, res) => {
     const clean = fullUrl.split('?')[0];
     await db.run('UPDATE users SET endpoint_clientes = ? WHERE id = 1', [clean]);
     io.to('room_1').emit('novo_log', `[${new Date().toLocaleTimeString()}] 🎯 Rota válida capturada: ${clean}`);
-    processarDadosSigma(1);
+    processarComDebounce(1);
     res.json({ success: true });
 });
 
@@ -154,8 +222,12 @@ app.get('/api/config', async (req, res) => {
     res.json(await db.get('SELECT painel_url FROM users WHERE id = 1') || {});
 });
 
+// ─────────────────────────────────────────────
+// SOCKET.IO
+// ─────────────────────────────────────────────
 io.on('connection', (socket) => {
     socket.on('join_room', (id) => socket.join(`room_${id}`));
+
     socket.on('save_config', async (d) => {
         await db.run('UPDATE users SET painel_url = ? WHERE id = 1', [d.url]);
         socket.emit('open_sigma_tab', { url: d.url });
