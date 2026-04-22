@@ -36,28 +36,42 @@ app.use(express.json());
 app.use(express.static('public'));
 
 // ==========================================
-// 🚀 MOTOR DE EXTRAÇÃO (RÉGUA)
+// 🚀 MOTOR DE EXTRAÇÃO (VARREDURA)
 // ==========================================
 async function dispararCobrancaSaaS(userId) {
     const user = await db.get('SELECT * FROM users WHERE id = ?', [userId]);
     const log = (msg) => io.to(`room_${userId}`).emit('novo_log', `[${new Date().toLocaleTimeString()}] ${msg}`);
 
-    if (!user || !user.cookie_sigma || !user.endpoint_clientes) {
-        return log("⚠️ Sistema aguardando Cookie e Endpoint. Sincronize no painel.");
+    if (!user) return;
+
+    log("🤖 Iniciando processamento interno...");
+
+    if (!user.cookie_sigma) {
+        return log("⏳ Aguardando sincronização de Cookie da extensão...");
+    }
+
+    if (!user.endpoint_clientes) {
+        return log("⏳ Rota de clientes não encontrada. Por favor, clique na aba 'Clientes' no Sigma.");
     }
 
     try {
-        log(`📡 Iniciando varredura na régua de cobrança...`);
-        const response = await axios.get(`${user.endpoint_clientes}?page=1&limit=200`, {
+        log(`📂 Acessando banco de dados do Sigma via: ${user.endpoint_clientes}`);
+        
+        const response = await axios.get(`${user.endpoint_clientes}?page=1&limit=300`, {
             headers: { 
                 'Cookie': user.cookie_sigma, 
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' 
             },
-            timeout: 15000
+            timeout: 20000
         });
 
-        const clientes = response.data.data || response.data.rows || response.data;
-        if (!Array.isArray(clientes)) return log("❌ Formato de lista de clientes inválido.");
+        let clientes = response.data.data || response.data.rows || response.data;
+        
+        if (!Array.isArray(clientes)) {
+            return log("❌ Falha ao ler lista: Formato de dados desconhecido.");
+        }
+
+        log(`📊 Total de ${clientes.length} clientes importados. Filtrando régua...`);
 
         const regua = [-7, -5, -3, -1, 0, 1, 3, 5, 7];
         const hoje = new Date(); hoje.setHours(0,0,0,0);
@@ -74,43 +88,17 @@ async function dispararCobrancaSaaS(userId) {
                 const nome = c.notes || c.name || c.username || "Cliente";
                 const zap = c.whatsapp?.replace(/\D/g, '') || c.phone?.replace(/\D/g, '');
                 
-                let status = diffDays === 0 ? "🔥 VENCE HOJE" : (diffDays < 0 ? "⚠️ ATRASADO" : "📅 A VENCER");
-                log(`📍 [DIA ${diffDays}] ${status} | ${nome} | Zap: ${zap}`);
+                let status = diffDays === 0 ? "🔥 HOJE" : (diffDays < 0 ? "⚠️ ATRASADO" : "📅 A VENCER");
+                log(`📍 [DIA ${diffDays}] ${status} | ${nome} | WhatsApp: ${zap}`);
                 count++;
             }
         });
-        log(`✅ Varredura finalizada: ${count} clientes identificados.`);
+
+        log(`✅ Processo concluído! ${count} clientes prontos para cobrança.`);
     } catch (e) { 
-        log(`❌ Erro na varredura: ${e.message}`); 
+        log(`❌ Erro na conexão com Sigma: ${e.message}`); 
     }
 }
-
-// ==========================================
-// 🔑 ROTAS DE SINCRONIZAÇÃO
-// ==========================================
-app.post('/api/sync-cookie', async (req, res) => {
-    const { userId, cookie } = req.body;
-    const id = userId || 1;
-    await db.run('UPDATE users SET cookie_sigma = ? WHERE id = ?', [cookie, id]);
-    
-    console.log(`[ID ${id}] 🔑 Cookie recebido e salvo!`);
-    io.to(`room_${id}`).emit('novo_log', `[${new Date().toLocaleTimeString()}] 🔑 Cookie sincronizado com sucesso!`);
-    
-    dispararCobrancaSaaS(id);
-    res.json({ success: true });
-});
-
-app.post('/api/sync-endpoint', async (req, res) => {
-    const { userId, fullUrl } = req.body;
-    const id = userId || 1;
-    if (fullUrl.includes('/api/customers')) {
-        const clean = fullUrl.split('?')[0];
-        await db.run('UPDATE users SET endpoint_clientes = ? WHERE id = ?', [clean, id]);
-        console.log(`[ID ${id}] 🎯 API DETECTADA: ${clean}`);
-        io.to(`room_${id}`).emit('novo_log', `🎯 API de Clientes Detectada: ${clean}`);
-    }
-    res.json({ success: true });
-});
 
 // ==========================================
 // 📱 WHATSAPP (BAILEYS)
@@ -130,7 +118,7 @@ async function startWhatsApp(userId) {
 
     sock.ev.on('creds.update', saveCreds);
 
-    sock.ev.on('connection.update', (update) => {
+    sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect, qr } = update;
         
         if (qr) {
@@ -139,8 +127,11 @@ async function startWhatsApp(userId) {
 
         if (connection === 'open') {
             activeClients[userId] = sock;
-            console.log(`[ID ${userId}] ✅ WHATSAPP CONECTADO!`);
+            console.log(`[ID ${userId}] WhatsApp Conectado!`);
             io.to(`room_${userId}`).emit('status_update', { conectado: true });
+            
+            // AUTO-START: Se já tem dados, já varre assim que o Zap conecta
+            dispararCobrancaSaaS(userId);
         }
 
         if (connection === 'close') {
@@ -154,22 +145,40 @@ async function startWhatsApp(userId) {
 }
 
 // ==========================================
-// 🔑 ROTAS DE LOGIN E CONFIG
+// 🔑 ROTAS DE SINCRONIZAÇÃO
+// ==========================================
+app.post('/api/sync-cookie', async (req, res) => {
+    const { userId, cookie } = req.body;
+    const id = userId || 1;
+    await db.run('UPDATE users SET cookie_sigma = ? WHERE id = ?', [cookie, id]);
+    console.log(`[ID ${id}] 🔑 Cookie Sincronizado!`);
+    dispararCobrancaSaaS(id); // Dispara ao receber novo cookie
+    res.json({ success: true });
+});
+
+app.post('/api/sync-endpoint', async (req, res) => {
+    const { userId, fullUrl } = req.body;
+    const id = userId || 1;
+    if (fullUrl.includes('/api/customers')) {
+        const clean = fullUrl.split('?')[0];
+        await db.run('UPDATE users SET endpoint_clientes = ? WHERE id = ?', [clean, id]);
+        console.log(`[ID ${id}] 🎯 API DETECTADA: ${clean}`);
+    }
+    res.json({ success: true });
+});
+
+// ==========================================
+// 🔑 LOGIN E CONFIG
 // ==========================================
 app.post('/api/login', async (req, res) => {
     const row = await db.get('SELECT * FROM users WHERE username = ? AND password = ?', [req.body.user, req.body.pass]);
-    if (row) { req.session.userId = row.id; res.json({ success: true }); } 
-    else res.status(401).send();
+    if (row) { req.session.userId = row.id; res.json({ success: true }); } else res.status(401).send();
 });
 
-app.get('/api/me', (req, res) => { 
-    if (req.session.userId) res.json({ id: req.session.userId }); 
-    else res.status(401).send(); 
-});
+app.get('/api/me', (req, res) => { if (req.session.userId) res.json({ id: req.session.userId }); else res.status(401).send(); });
 
 app.get('/api/config', async (req, res) => {
     if (!req.session.userId) return res.status(401).send();
-    // CORREÇÃO SQL AQUI: Adicionado "="
     const config = await db.get('SELECT painel_url FROM users WHERE id = ?', [req.session.userId]);
     res.json(config || {});
 });
