@@ -18,7 +18,6 @@ app.use(cors());
 let db;
 const activeClients = {};
 
-// Inicialização com a nova coluna 'endpoint_clientes'
 (async () => {
     db = await open({ filename: './database.sqlite', driver: sqlite3.Database });
     await db.exec(`CREATE TABLE IF NOT EXISTS users (
@@ -37,30 +36,38 @@ app.use(express.json());
 app.use(express.static('public'));
 
 // ==========================================
-// 🎯 ROTA PARA SINCRONIZAR O ENDPOINT REAL
+// 🎯 ROTA DE SINCRONIZAÇÃO DE ENDPOINT
 // ==========================================
 app.post('/api/sync-endpoint', async (req, res) => {
     const { userId, fullUrl } = req.body;
-    // Remove parâmetros de busca (query string) para ter o link limpo
-    const cleanEndpoint = fullUrl.split('?')[0];
-    
-    await db.run('UPDATE users SET endpoint_clientes = ? WHERE id = ?', [cleanEndpoint, userId || 1]);
-    
-    console.log(`[ID ${userId || 1}] 🎯 ENDPOINT DETECTADO: ${cleanEndpoint}`);
-    io.to(`room_${userId || 1}`).emit('novo_log', `🎯 Caminho da API detectado: ${cleanEndpoint}`);
-    
+    // Filtramos para pegar apenas a API de listagem real
+    if (fullUrl.includes('/api/customers')) {
+        const cleanEndpoint = fullUrl.split('?')[0];
+        await db.run('UPDATE users SET endpoint_clientes = ? WHERE id = ?', [cleanEndpoint, userId || 1]);
+        console.log(`[ID ${userId || 1}] 🎯 ENDPOINT DEFINIDO: ${cleanEndpoint}`);
+        io.to(`room_${userId || 1}`).emit('novo_log', `🎯 API de Clientes Vinculada: ${cleanEndpoint}`);
+    }
     res.json({ success: true });
 });
 
+// ==========================================
+// 🚀 MOTOR DE EXTRAÇÃO (RÉGUA DE COBRANÇA)
+// ==========================================
 async function dispararCobrancaSaaS(userId) {
     const user = await db.get('SELECT * FROM users WHERE id = ?', [userId]);
     const sock = activeClients[userId];
+    
+    // Se não tiver cookie ou endpoint, não tem como trabalhar
     if (!user || !user.cookie_sigma || !user.endpoint_clientes) return;
 
-    const log = (msg) => io.to(`room_${userId}`).emit('novo_log', `[${new Date().toLocaleTimeString()}] ${msg}`);
+    const log = (msg) => {
+        const linha = `[${new Date().toLocaleTimeString()}] ${msg}`;
+        io.to(`room_${userId}`).emit('novo_log', linha);
+        console.log(`[ID ${userId}] ${linha}`);
+    };
 
     try {
-        log(`📡 Acessando lista via: ${user.endpoint_clientes}`);
+        log(`📡 Buscando dados em: ${user.endpoint_clientes}`);
         
         const response = await axios.get(`${user.endpoint_clientes}?page=1&limit=200`, {
             headers: { 
@@ -69,8 +76,12 @@ async function dispararCobrancaSaaS(userId) {
             }
         });
 
-        const clientes = response.data.data || response.data.users || response.data.customers || response.data;
-        if (!Array.isArray(clientes)) return log("❌ Formato de dados não reconhecido.");
+        // O Sigma costuma retornar a lista em response.data.data ou response.data.rows
+        let clientes = response.data.data || response.data.rows || response.data;
+        
+        if (!Array.isArray(clientes)) {
+            return log("❌ Erro: A API respondeu, mas a lista de clientes não foi reconhecida.");
+        }
 
         const regua = [-7, -5, -3, -1, 0, 1, 3, 5, 7];
         const hoje = new Date();
@@ -78,35 +89,49 @@ async function dispararCobrancaSaaS(userId) {
 
         let count = 0;
         clientes.forEach(c => {
-            const exp = c.expiration || c.expiry || c.vencimento;
+            // Mapeia data de expiração (pode ser expiration ou expiry)
+            const exp = c.expiration || c.expiry;
             if (!exp) return;
+
             const dtVenc = new Date(exp);
             dtVenc.setHours(0, 0, 0, 0);
+            
+            // Diferença em dias
             const diffDays = Math.ceil((dtVenc - hoje) / (1000 * 60 * 60 * 24));
 
             if (regua.includes(diffDays)) {
                 const nome = c.notes || c.name || c.username || "Cliente";
-                const zap = c.whatsapp?.replace(/\D/g, '') || c.phone?.replace(/\D/g, '');
-                log(`📍 [DIA ${diffDays}] Cliente: ${nome} | Zap: ${zap}`);
+                const zap = c.whatsapp?.replace(/\D/g, '') || c.phone?.replace(/\D/g, '') || "S/N";
+                
+                let status = diffDays === 0 ? "🔥 VENCE HOJE" : (diffDays < 0 ? "⚠️ ATRASADO" : "📅 A VENCER");
+                log(`📍 [DIA ${diffDays}] ${status} | ${nome} | Zap: ${zap}`);
                 count++;
             }
         });
-        log(`✅ Varredura concluída. ${count} clientes na régua.`);
+
+        log(`✅ Varredura Finalizada. ${count} clientes encontrados na régua.`);
+
     } catch (e) {
-        log(`❌ Erro na varredura: ${e.message}`);
+        log(`❌ Erro na extração: ${e.message}`);
     }
 }
 
-// ROTA DO COOKIE (Mantenha igual)
+// ==========================================
+// 🔑 ROTA DO COOKIE (MANTIDA)
+// ==========================================
 app.post('/api/sync-cookie', async (req, res) => {
     const { userId, cookie } = req.body;
     await db.run('UPDATE users SET cookie_sigma = ? WHERE id = ?', [cookie, userId || 1]);
     console.log(`[ID ${userId || 1}] 🔑 Cookie Sincronizado!`);
+    
+    // Agora que recebeu o cookie, tenta rodar a varredura
     dispararCobrancaSaaS(userId || 1);
     res.json({ success: true });
 });
 
-// WHATSAPP E ROTAS RESTANTES (Mantenha igual)
+// ==========================================
+// 📱 WHATSAPP & INTERFACE (MANTIDOS)
+// ==========================================
 async function startWhatsApp(userId) {
     if (activeClients[userId]) return;
     const { state, saveCreds } = await useMultiFileAuthState(`auth_info_${userId}`);
@@ -117,18 +142,24 @@ async function startWhatsApp(userId) {
         if (u.connection === 'open') {
             activeClients[userId] = sock;
             io.to(`room_${userId}`).emit('status_update', { conectado: true });
+            console.log(`[ID ${userId}] WhatsApp Conectado!`);
         }
     });
 }
+
 app.post('/api/login', async (req, res) => {
     const row = await db.get('SELECT * FROM users WHERE username = ? AND password = ?', [req.body.user, req.body.pass]);
     if (row) { req.session.userId = row.id; res.json({ success: true }); } else res.status(401).send();
 });
+
 app.get('/api/me', (req, res) => { if (req.session.userId) res.json({ id: req.session.userId }); else res.status(401).send(); });
+
 app.get('/api/config', async (req, res) => {
-    const c = await db.get('SELECT painel_url FROM users WHERE id = ?', [req.session.userId]);
-    res.json(c || {});
+    if (!req.session.userId) return res.status(401).send();
+    const config = await db.get('SELECT painel_url FROM users WHERE id = ?', [req.session.userId]);
+    res.json(config || {});
 });
+
 io.on('connection', (s) => {
     s.on('join_room', (id) => { s.join(`room_${id}`); startWhatsApp(id); });
     s.on('save_config', async (d) => {
@@ -136,4 +167,5 @@ io.on('connection', (s) => {
         s.emit('open_sigma_tab', { url: d.url });
     });
 });
+
 server.listen(3000, () => console.log("🚀 Servidor Sniper Online!"));
