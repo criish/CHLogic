@@ -17,7 +17,6 @@ app.use(express.static('public'));
 
 let db;
 
-// Inicialização do Banco de Dados
 (async () => {
     db = await open({ filename: './database.sqlite', driver: sqlite3.Database });
     await db.exec(`CREATE TABLE IF NOT EXISTS users (
@@ -44,31 +43,36 @@ async function processarDadosSigma(userId) {
     const user = await db.get('SELECT * FROM users WHERE id = ?', [userId]);
     const log = (msg) => io.to(`room_${userId}`).emit('novo_log', `[${new Date().toLocaleTimeString()}] ${msg}`);
 
-    if (!user || !user.cookie_sigma || !user.endpoint_clientes) {
-        return log("⏳ Sistema aguardando sincronização da extensão...");
+    if (!user) return;
+
+    if (!user.cookie_sigma) {
+        return log("⏳ Aguardando Cookie... (Certifique-se de que a extensão está ativa)");
+    }
+    if (!user.endpoint_clientes) {
+        return log("⏳ Aguardando Rota de Clientes... (Clique em 'Clientes' no Sigma)");
     }
 
     try {
-        log(`📡 Acessando API em: ${user.endpoint_clientes}`);
+        log(`📡 Acessando lista de clientes em: ${user.endpoint_clientes}`);
         
         const baseUrl = new URL(user.endpoint_clientes).origin;
 
-        const response = await axios.get(`${user.endpoint_clientes}?page=1&limit=300`, {
+        const response = await axios.get(`${user.endpoint_clientes}?page=1&limit=500`, {
             headers: { 
                 'Cookie': user.cookie_sigma, 
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
                 'Referer': `${baseUrl}/`,
-                'Accept': 'application/json'
+                'Accept': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest'
             },
             timeout: 15000
         });
 
         const data = response.data;
-        // Tenta encontrar a lista de clientes em diferentes formatos de resposta do Sigma
         let clientes = data.data || data.rows || (Array.isArray(data) ? data : null);
         
         if (clientes && Array.isArray(clientes)) {
-            log(`✅ Sucesso! ${clientes.length} clientes recebidos.`);
+            log(`✅ Conexão OK! ${clientes.length} clientes carregados.`);
 
             const regua = [-7, -5, -3, -1, 0, 1, 3, 5, 7];
             const hoje = new Date(); hoje.setHours(0,0,0,0);
@@ -92,13 +96,17 @@ async function processarDadosSigma(userId) {
                 }
             });
 
-            log(`🏆 Varredura concluída: ${countRegua} clientes identificados na régua.`);
+            log(`🏆 Varredura concluída: ${countRegua} encontrados.`);
         } else {
-            log("⚠️ API respondeu, mas a lista de clientes veio vazia.");
+            log("⚠️ API respondeu 200, mas o formato da lista é inválido.");
         }
 
     } catch (e) {
-        log(`❌ Erro no acesso: ${e.response?.status || 'Conexão'} - ${e.message}`);
+        if (e.response?.status === 401) {
+            log("❌ Erro 401: Não autorizado. Tente clicar em 'Sincronizar' novamente.");
+        } else {
+            log(`❌ Erro no acesso: ${e.message}`);
+        }
     }
 }
 
@@ -106,20 +114,28 @@ async function processarDadosSigma(userId) {
 // 🔑 ROTAS DA EXTENSÃO (SYNC)
 // ==========================================
 app.post('/api/sync-cookie', async (req, res) => {
-    await db.run('UPDATE users SET cookie_sigma = ? WHERE id = 1', [req.body.cookie]);
-    console.log("🔑 Cookie Sincronizado");
-    processarDadosSigma(1);
+    const { userId, cookie } = req.body;
+    const id = userId || 1;
+    await db.run('UPDATE users SET cookie_sigma = ? WHERE id = ?', [cookie, id]);
+    console.log(`[ID ${id}] 🔑 Cookie Recebido.`);
+    io.to(`room_${id}`).emit('novo_log', `[${new Date().toLocaleTimeString()}] 🔑 Cookie sincronizado!`);
+    
+    // Tenta processar agora que temos o cookie
+    processarDadosSigma(id);
     res.json({ success: true });
 });
 
 app.post('/api/sync-endpoint', async (req, res) => {
-    const url = req.body.fullUrl;
-    // Filtro para garantir que pegamos a listagem real e não contadores/gráficos
-    if (url.includes('/api/customers') && !url.includes('-count') && !url.includes('charts')) {
-        const clean = url.split('?')[0];
-        await db.run('UPDATE users SET endpoint_clientes = ? WHERE id = 1', [clean]);
-        io.to('room_1').emit('novo_log', `🎯 Rota Válida Detectada: ${clean}`);
-        processarDadosSigma(1);
+    const { userId, fullUrl } = req.body;
+    const id = userId || 1;
+    
+    if (fullUrl.includes('/api/customers') && !fullUrl.includes('-count') && !fullUrl.includes('charts')) {
+        const clean = fullUrl.split('?')[0];
+        await db.run('UPDATE users SET endpoint_clientes = ? WHERE id = ?', [clean, id]);
+        io.to(`room_${id}`).emit('novo_log', `🎯 Rota Válida: ${clean}`);
+        
+        // Tenta processar agora que temos a rota
+        processarDadosSigma(id);
     }
     res.json({ success: true });
 });
@@ -143,11 +159,10 @@ app.get('/api/config', async (req, res) => {
 
 io.on('connection', (socket) => {
     socket.on('join_room', (userId) => socket.join(`room_${userId}`));
-    
     socket.on('save_config', async (data) => {
         await db.run('UPDATE users SET painel_url = ? WHERE id = 1', [data.url]);
         socket.emit('open_sigma_tab', { url: data.url });
     });
 });
 
-server.listen(3000, () => console.log("🚀 Sniper Online (Extração de Dados) na porta 3000"));
+server.listen(3000, () => console.log("🚀 Sniper Online na porta 3000"));
