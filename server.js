@@ -16,7 +16,6 @@ app.use(express.json());
 app.use(express.static('public'));
 
 let db;
-
 (async () => {
     db = await open({ filename: './database.sqlite', driver: sqlite3.Database });
     await db.exec(`CREATE TABLE IF NOT EXISTS users (
@@ -30,139 +29,83 @@ let db;
     )`);
 })();
 
-app.use(session({
-    secret: 'CH_SNIPER_2026',
-    resave: false,
-    saveUninitialized: false
-}));
+app.use(session({ secret: 'CH_SNIPER_2026', resave: false, saveUninitialized: false }));
 
-// ==========================================
-// 🚀 MOTOR DE EXTRAÇÃO (FOCO EM DADOS)
-// ==========================================
 async function processarDadosSigma(userId) {
     const user = await db.get('SELECT * FROM users WHERE id = ?', [userId]);
     const log = (msg) => io.to(`room_${userId}`).emit('novo_log', `[${new Date().toLocaleTimeString()}] ${msg}`);
 
     if (!user) return;
 
-    if (!user.cookie_sigma) {
-        return log("⏳ Aguardando Cookie... (Certifique-se de que a extensão está ativa)");
-    }
-    if (!user.endpoint_clientes) {
-        return log("⏳ Aguardando Rota de Clientes... (Clique em 'Clientes' no Sigma)");
-    }
+    // Verificação de segurança
+    if (!user.cookie_sigma) return log("⏳ Aguardando Cookie (Verifique se a extensão está instalada)...");
+    if (!user.endpoint_clientes) return log("⏳ Aguardando Rota (Clique em 'Clientes' no Sigma)...");
 
     try {
-        log(`📡 Acessando lista de clientes em: ${user.endpoint_clientes}`);
+        log(`📡 Iniciando extração oficial em: ${user.endpoint_clientes}`);
         
         const baseUrl = new URL(user.endpoint_clientes).origin;
-
         const response = await axios.get(`${user.endpoint_clientes}?page=1&limit=500`, {
             headers: { 
                 'Cookie': user.cookie_sigma, 
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
                 'Referer': `${baseUrl}/`,
-                'Accept': 'application/json',
                 'X-Requested-With': 'XMLHttpRequest'
             },
             timeout: 15000
         });
 
-        const data = response.data;
-        let clientes = data.data || data.rows || (Array.isArray(data) ? data : null);
+        const clientes = response.data.data || response.data.rows || (Array.isArray(response.data) ? response.data : null);
         
         if (clientes && Array.isArray(clientes)) {
-            log(`✅ Conexão OK! ${clientes.length} clientes carregados.`);
-
+            log(`✅ SUCESSO! ${clientes.length} clientes carregados.`);
             const regua = [-7, -5, -3, -1, 0, 1, 3, 5, 7];
             const hoje = new Date(); hoje.setHours(0,0,0,0);
-            let countRegua = 0;
+            let count = 0;
 
             clientes.forEach((c) => {
-                const nome = c.notes || c.name || c.username || "Sem Nome";
-                const zap = c.whatsapp?.replace(/\D/g, '') || c.phone?.replace(/\D/g, '') || "Sem Zap";
-                const exp = c.expiration || c.expiry || c.expiry_date;
-
+                const exp = c.expiration || c.expiry;
                 if (exp) {
-                    const dtVenc = new Date(exp);
-                    dtVenc.setHours(0,0,0,0);
+                    const dtVenc = new Date(exp); dtVenc.setHours(0,0,0,0);
                     const diffDays = Math.ceil((dtVenc - hoje) / (1000 * 60 * 60 * 24));
-
                     if (regua.includes(diffDays)) {
-                        let status = diffDays === 0 ? "🔥 HOJE" : (diffDays < 0 ? "⚠️ ATRASADO" : "📅 A VENCER");
-                        log(`📍 [DIA ${diffDays}] ${status} | ${nome} | Zap: ${zap}`);
-                        countRegua++;
+                        log(`📍 [DIA ${diffDays}] ${c.notes || c.name} | Zap: ${c.whatsapp || c.phone}`);
+                        count++;
                     }
                 }
             });
-
-            log(`🏆 Varredura concluída: ${countRegua} encontrados.`);
-        } else {
-            log("⚠️ API respondeu 200, mas o formato da lista é inválido.");
+            log(`🏆 Varredura finalizada. ${count} encontrados.`);
         }
-
     } catch (e) {
-        if (e.response?.status === 401) {
-            log("❌ Erro 401: Não autorizado. Tente clicar em 'Sincronizar' novamente.");
-        } else {
-            log(`❌ Erro no acesso: ${e.message}`);
-        }
+        log(`❌ Erro: ${e.response?.status || e.message}`);
     }
 }
 
-// ==========================================
-// 🔑 ROTAS DA EXTENSÃO (SYNC)
-// ==========================================
 app.post('/api/sync-cookie', async (req, res) => {
-    const { userId, cookie } = req.body;
-    const id = userId || 1;
-    await db.run('UPDATE users SET cookie_sigma = ? WHERE id = ?', [cookie, id]);
-    console.log(`[ID ${id}] 🔑 Cookie Recebido.`);
-    io.to(`room_${id}`).emit('novo_log', `[${new Date().toLocaleTimeString()}] 🔑 Cookie sincronizado!`);
-    
-    // Tenta processar agora que temos o cookie
-    processarDadosSigma(id);
+    await db.run('UPDATE users SET cookie_sigma = ? WHERE id = 1', [req.body.cookie]);
+    io.to('room_1').emit('novo_log', `[${new Date().toLocaleTimeString()}] 🔑 Cookie sincronizado!`);
+    processarDadosSigma(1);
     res.json({ success: true });
 });
 
 app.post('/api/sync-endpoint', async (req, res) => {
-    const { userId, fullUrl } = req.body;
-    const id = userId || 1;
-    
-    if (fullUrl.includes('/api/customers') && !fullUrl.includes('-count') && !fullUrl.includes('charts')) {
-        const clean = fullUrl.split('?')[0];
-        await db.run('UPDATE users SET endpoint_clientes = ? WHERE id = ?', [clean, id]);
-        io.to(`room_${id}`).emit('novo_log', `🎯 Rota Válida: ${clean}`);
-        
-        // Tenta processar agora que temos a rota
-        processarDadosSigma(id);
-    }
+    const clean = req.body.fullUrl.split('?')[0];
+    await db.run('UPDATE users SET endpoint_clientes = ? WHERE id = 1', [clean]);
+    io.to('room_1').emit('novo_log', `🎯 Rota Válida: ${clean}`);
+    processarDadosSigma(1);
     res.json({ success: true });
 });
 
-// ==========================================
-// 🔑 ROTAS DO PAINEL
-// ==========================================
-app.post('/api/login', (req, res) => {
-    req.session.userId = 1;
-    res.json({ success: true });
-});
-
-app.get('/api/me', (req, res) => {
-    res.json({ id: 1 });
-});
-
-app.get('/api/config', async (req, res) => {
-    const config = await db.get('SELECT painel_url FROM users WHERE id = 1');
-    res.json(config || {});
-});
-
+// Outras rotas (login/config) mantidas iguais
+app.post('/api/login', (req, res) => { req.session.userId = 1; res.json({ success: true }); });
+app.get('/api/me', (req, res) => { res.json({ id: 1 }); });
+app.get('/api/config', async (req, res) => { res.json(await db.get('SELECT painel_url FROM users WHERE id = 1') || {}); });
 io.on('connection', (socket) => {
-    socket.on('join_room', (userId) => socket.join(`room_${userId}`));
-    socket.on('save_config', async (data) => {
-        await db.run('UPDATE users SET painel_url = ? WHERE id = 1', [data.url]);
-        socket.emit('open_sigma_tab', { url: data.url });
+    socket.on('join_room', (id) => socket.join(`room_${id}`));
+    socket.on('save_config', async (d) => {
+        await db.run('UPDATE users SET painel_url = ? WHERE id = 1', [d.url]);
+        socket.emit('open_sigma_tab', { url: d.url });
     });
 });
 
-server.listen(3000, () => console.log("🚀 Sniper Online na porta 3000"));
+server.listen(3000, () => console.log("🚀 Sniper Online!"));
