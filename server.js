@@ -8,7 +8,7 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const qrcode = require('qrcode');
-const puppeteer = require('puppeteer');
+const axios = require('axios'); // Motor ultra-leve para o Sigma
 const session = require('express-session');
 const sqlite3 = require('sqlite3');
 const { open } = require('sqlite');
@@ -19,15 +19,13 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-// Configurações de Admin
+// Configurações de Segurança
 const ADMIN_USER = 'admin';
 const ADMIN_PASS = 'CH@dmin2026';
-const MODO_TESTE_SISTEMA = false;
 
 let db;
 const activeClients = {};
 
-// Inicialização do Banco de Dados
 (async () => {
     db = await open({ filename: './database.sqlite', driver: sqlite3.Database });
     await db.exec(`CREATE TABLE IF NOT EXISTS users (
@@ -52,7 +50,7 @@ app.use(express.json());
 app.use(express.static('public'));
 
 // ==========================================
-// 🤖 MOTOR SNIPER (PUPPETEER OTIMIZADO)
+// 🚀 MOTOR DE DISPARO (MODO API - ULTRA LEVE)
 // ==========================================
 async function dispararCobrancaSaaS(userId) {
     const user = await db.get('SELECT * FROM users WHERE id = ?', [userId]);
@@ -62,51 +60,36 @@ async function dispararCobrancaSaaS(userId) {
 
     const log = (msg) => {
         const dataHora = new Date().toLocaleTimeString('pt-BR');
-        io.to(`room_${userId}`).emit('novo_log', `[${dataHora}] ${msg}`);
+        const linha = `[${dataHora}] ${msg}`;
+        console.log(`[ID ${userId}] ${linha}`); // Imprime no Terminal (Termius)
+        io.to(`room_${userId}`).emit('novo_log', linha); // Imprime na Página (Chrome)
     };
 
-    log(`🚀 Iniciando Robô no Painel Sigma...`);
-
-    const browser = await puppeteer.launch({
-        headless: true,
-        executablePath: '/usr/bin/chromium-browser', //
-        args: [
-            '--no-sandbox', 
-            '--disable-setuid-sandbox', 
-            '--disable-dev-shm-usage', 
-            '--single-process', 
-            '--disable-gpu'
-        ],
-        timeout: 120000 // Timeout estendido para Oracle
-    });
-
     try {
-        const page = await browser.newPage();
-        // Bloqueia imagens para economizar RAM da VPS
-        await page.setRequestInterception(true);
-        page.on('request', (req) => {
-            if (['image', 'stylesheet', 'font'].includes(req.resourceType())) req.abort();
-            else req.continue();
+        log(`📡 Tentando login via API no Sigma...`);
+        
+        // Login direto via HTTP (Baseado na captura do seu script)
+        const response = await axios.post(`${user.painel_url.replace(/\/$/, '')}/api/auth/login`, {
+            captcha: "not-a-robot",
+            captchaChecked: true,
+            username: user.usuario_sigma,
+            password: user.senha_sigma,
+            twofactor_code: "",
+            twofactor_recovery_code: "",
+            twofactor_trusted_device_id: ""
         });
 
-        const loginUrl = `${user.painel_url.replace(/\/$/, '')}/#/sign-in`;
-        await page.goto(loginUrl, { waitUntil: 'networkidle2' });
+        if (response.status === 200) {
+            log(`✅ LOGIN REALIZADO COM SUCESSO NO SIGMA!`);
+            log(`👤 Usuário logado: ${response.data.user?.username || user.usuario_sigma}`);
+            
+            // Aqui o robô aguarda a URL da lista de clientes para prosseguir
+            log(`⏳ Aguardando mapeamento da lista de clientes para disparar...`);
+        }
 
-        await page.type('input[type="text"]', user.usuario_sigma, { delay: 50 });
-        await page.type('input[type="password"]', user.senha_sigma, { delay: 50 });
-        await page.keyboard.press('Enter');
-
-        log('🔑 Login realizado, processando disparos...');
-        await new Promise(r => setTimeout(r, 5000));
-
-        // Aqui segue sua lógica de captura de links e envio via sock.sendMessage
-        // Exemplo: await sock.sendMessage(fone + "@s.whatsapp.net", { text: msg });
-        
-        log('🏁 Processo concluído com sucesso.');
     } catch (e) {
-        log(`❌ Erro: ${e.message}`);
-    } finally {
-        await browser.close();
+        const erroMsg = e.response?.data?.message || e.message;
+        log(`❌ Falha no login do Sigma: ${erroMsg}`);
     }
 }
 
@@ -150,12 +133,13 @@ async function startWhatsApp(userId) {
 }
 
 // ==========================================
-// 🔑 ROTAS E SOCKETS
+// 🔑 ROTAS DE API
 // ==========================================
 app.post('/api/login', async (req, res) => {
     const row = await db.get('SELECT * FROM users WHERE username = ? AND password = ?', [req.body.user, req.body.pass]);
     if (row) {
         req.session.userId = row.id;
+        req.session.username = row.username;
         res.json({ success: true });
     } else res.status(401).json({ success: false });
 });
@@ -165,6 +149,15 @@ app.get('/api/me', (req, res) => {
     else res.status(401).send();
 });
 
+app.get('/api/config', async (req, res) => {
+    if (!req.session.userId) return res.status(401).send();
+    const config = await db.get('SELECT painel_url, usuario_sigma, senha_sigma FROM users WHERE id = ?', [req.session.userId]);
+    res.json(config || {});
+});
+
+// ==========================================
+// ⚡ SOCKET.IO
+// ==========================================
 io.on('connection', (socket) => {
     socket.on('join_room', (userId) => {
         socket.join(`room_${userId}`);
@@ -179,4 +172,4 @@ io.on('connection', (socket) => {
     });
 });
 
-server.listen(3000, () => console.log("🚀 CH Logic (Baileys Version) na porta 3000"));
+server.listen(3000, () => console.log("🚀 CH Logic (Ultra Leve) rodando na porta 3000"));
