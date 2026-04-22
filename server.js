@@ -43,7 +43,7 @@ app.use(express.json());
 app.use(express.static('public'));
 
 // ==========================================
-// 🚀 MOTOR DE EXTRAÇÃO (TESTE DA RÉGUA)
+// 🚀 MOTOR DE EXTRAÇÃO (RÉGUA DE COBRANÇA)
 // ==========================================
 async function dispararCobrancaSaaS(userId) {
     const user = await db.get('SELECT * FROM users WHERE id = ?', [userId]);
@@ -59,21 +59,42 @@ async function dispararCobrancaSaaS(userId) {
 
     try {
         let urlBase = user.painel_url.split('/#')[0].replace(/\/$/, '');
-        log("📡 Iniciando varredura estratégica (Régua de Cobrança)...");
+        log("📡 Iniciando varredura estratégica...");
 
-        // Buscando uma lista maior (200) para garantir que pegamos os vencimentos da régua
-        const response = await axios.get(`${urlBase}/api/resellers/customers?page=1&limit=200`, {
-            headers: { 
-                'Cookie': user.cookie_sigma,
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        // Lista de possíveis caminhos para a API de clientes no Sigma
+        const caminhosPosiveis = [
+            `${urlBase}/api/customers?page=1&limit=200`,
+            `${urlBase}/api/resellers/customers?page=1&limit=200`
+        ];
+
+        let response;
+        let erroFinal;
+
+        // Tenta os caminhos um por um
+        for (const url of caminhosPosiveis) {
+            try {
+                log(`🔍 Testando rota: ${url.replace(urlBase, '')}`);
+                response = await axios.get(url, {
+                    headers: { 
+                        'Cookie': user.cookie_sigma,
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                    }
+                });
+                if (response.status === 200) break; // Se deu certo, sai do loop
+            } catch (e) {
+                erroFinal = e;
             }
-        });
+        }
 
-        // O Sigma costuma retornar os dados em response.data.data ou direto em response.data
+        if (!response) {
+            throw new Error(`Não foi possível acessar a lista de clientes (Erro 404). Verifique se a URL do painel está correta.`);
+        }
+
+        // O Sigma pode retornar em .data.data ou .data puro
         const clientes = response.data.data || response.data;
         
         if (!Array.isArray(clientes)) {
-            return log("❌ Erro: Formato da lista de clientes inválido ou acesso negado.");
+            return log("❌ Erro: Dados recebidos não são uma lista válida.");
         }
 
         const regua = [-7, -5, -3, -1, 0, 1, 3, 5, 7];
@@ -83,35 +104,34 @@ async function dispararCobrancaSaaS(userId) {
         hoje.setHours(0, 0, 0, 0);
 
         clientes.forEach(cliente => {
+            // No Sigma, a data de expiração costuma vir em 'expiration'
             if (!cliente.expiration) return;
 
             const dataVencimento = new Date(cliente.expiration);
             dataVencimento.setHours(0, 0, 0, 0);
 
-            // Cálculo da diferença de dias (Vencimento - Hoje)
             const diffTime = dataVencimento - hoje;
             const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 
-            // Verifica se a diferença de dias está na sua régua (-7 a 7)
             if (regua.includes(diffDays)) {
-                // Captura nome e whatsapp (tentando campos comuns do Sigma)
-                const nome = cliente.notes || cliente.name || "Sem Nome";
-                const whatsapp = cliente.whatsapp?.replace(/\D/g, '') || cliente.phone?.replace(/\D/g, '') || "Número Não Encontrado";
+                // Mapeia nome (notes ou name) e whatsapp
+                const nome = cliente.notes || cliente.name || "Cliente";
+                const whatsapp = cliente.whatsapp?.replace(/\D/g, '') || cliente.phone?.replace(/\D/g, '') || "S/N";
                 
                 let tipo = "";
                 if (diffDays === 0) tipo = "🔥 VENCE HOJE";
                 else if (diffDays < 0) tipo = "⚠️ ATRASADO";
                 else tipo = "📅 A VENCER";
 
-                log(`📍 [DIA ${diffDays}] ${tipo} | Cliente: ${nome} | Zap: ${whatsapp}`);
-                encontrados++;
+                log(`📍 [DIA ${diffDays}] ${tipo} | Nome: ${nome} | Zap: ${whatsapp}`);
+                encontados++;
             }
         });
 
         log(`✅ Varredura Finalizada. ${encontrados} clientes identificados na régua.`);
 
     } catch (e) {
-        log(`❌ Erro Técnico na varredura: ${e.message}`);
+        log(`❌ Erro Técnico: ${e.message}`);
     }
 }
 
@@ -127,9 +147,7 @@ app.post('/api/sync-cookie', async (req, res) => {
     await db.run('UPDATE users SET cookie_sigma = ? WHERE id = ?', [cookie, id]);
     console.log(`[ID ${id}] 🔑 COOKIE RECEBIDO COM SUCESSO!`);
     
-    // Dispara a verificação da régua automaticamente ao receber o cookie
     dispararCobrancaSaaS(id);
-    
     res.json({ success: true });
 });
 
@@ -162,7 +180,7 @@ async function startWhatsApp(userId) {
 }
 
 // ==========================================
-// 🔑 ROTAS DA INTERFACE
+// 🔑 ROTAS
 // ==========================================
 app.post('/api/login', async (req, res) => {
     const row = await db.get('SELECT * FROM users WHERE username = ? AND password = ?', [req.body.user, req.body.pass]);
