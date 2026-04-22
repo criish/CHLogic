@@ -12,8 +12,8 @@ const server = http.createServer(app);
 const io = new Server(server);
 
 app.use(cors());
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ limit: '50mb', extended: true }));
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ limit: '10mb', extended: true }));
 app.use(express.static('public'));
 
 let db;
@@ -24,7 +24,7 @@ let db;
         username TEXT UNIQUE,
         password TEXT,
         painel_url TEXT,
-        cookie_sigma TEXT,
+        bearer_token TEXT,
         endpoint_clientes TEXT,
         ativo INTEGER DEFAULT 1
     )`);
@@ -39,7 +39,7 @@ let db;
 app.use(session({ secret: 'CH_SNIPER_2026', resave: false, saveUninitialized: false }));
 
 // ─────────────────────────────────────────────
-// CORREÇÃO 1: Debounce — evita loop de requisições
+// Debounce — evita múltiplas varreduras simultâneas
 // ─────────────────────────────────────────────
 const timers = {};
 function processarComDebounce(userId) {
@@ -48,38 +48,7 @@ function processarComDebounce(userId) {
 }
 
 // ─────────────────────────────────────────────
-// CORREÇÃO 2: Filtro de cookie — envia só o que o Sigma precisa
-// O Cloudflare rejeita headers > ~8KB. A extensão captura TODOS
-// os cookies do navegador. Aqui filtramos apenas os de sessão/auth.
-// ─────────────────────────────────────────────
-function filtrarCookieSigma(cookieRaw) {
-    if (!cookieRaw) return '';
-
-    const relevantes = [
-        'sigma', 'session', 'token', 'auth', 'login',
-        'user', 'remember', 'jwt', 'laravel', 'xsrf',
-        'csrf', 'bearer', 'access', 'refresh', 'sid'
-    ];
-
-    const filtrado = cookieRaw
-        .split(';')
-        .map(c => c.trim())
-        .filter(c => {
-            const nome = c.split('=')[0].toLowerCase().trim();
-            return relevantes.some(r => nome.includes(r));
-        })
-        .join('; ');
-
-    // Fallback: se filtro zerar tudo, pega os primeiros 5 cookies
-    if (!filtrado) {
-        return cookieRaw.split(';').slice(0, 5).join('; ').trim();
-    }
-
-    return filtrado;
-}
-
-// ─────────────────────────────────────────────
-// CORE: Varredura de clientes no Sigma
+// CORE: Varredura de clientes usando Bearer Token
 // ─────────────────────────────────────────────
 async function processarDadosSigma(userId) {
     const user = await db.get('SELECT * FROM users WHERE id = ?', [userId]);
@@ -87,36 +56,34 @@ async function processarDadosSigma(userId) {
 
     if (!user) return;
 
-    if (!user.cookie_sigma) return log("⏳ Aguardando Cookie (Verifique se a extensão está instalada)...");
+    if (!user.bearer_token) return log("⏳ Aguardando Token (Clique em 'Clientes' no Sigma)...");
     if (!user.endpoint_clientes) return log("⏳ Aguardando Rota (Clique em 'Clientes' no Sigma)...");
 
-    const cookieFiltrado = filtrarCookieSigma(user.cookie_sigma);
-
-    if (!cookieFiltrado) {
-        return log('❌ Nenhum cookie de sessão válido encontrado. Faça login no Sigma novamente.');
-    }
-
-    log(`🧹 Cookie filtrado OK (${cookieFiltrado.length} bytes)`);
+    log(`🔑 Token OK | 🔗 Endpoint: ${user.endpoint_clientes}`);
 
     try {
-        log(`📡 Iniciando extração em: ${user.endpoint_clientes}`);
+        log(`📡 Iniciando extração...`);
 
         const baseUrl = new URL(user.endpoint_clientes).origin;
 
-        const response = await axios.get(`${user.endpoint_clientes}?page=1&per_page=500&limit=500`, {
+        // Monta URL com paginação grande para pegar todos os clientes
+        const url = `${user.endpoint_clientes.split('?')[0]}?page=1&perPage=500&username=&serverId=&packageId=&expiryFrom=&expiryTo=&status=&isTrial=&connections=`;
+
+        const response = await axios.get(url, {
             headers: {
-                'Cookie': cookieFiltrado,
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+                'Authorization': user.bearer_token,
+                'Accept': 'application/json',
+                'Accept-Language': 'pt-BR,pt;q=0.9',
+                'locale': 'pt',
+                'x-app-version': '3.78',
                 'Referer': `${baseUrl}/`,
                 'Origin': baseUrl,
-                'Accept': 'application/json, text/plain, */*',
-                'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
-                'Sec-Fetch-Site': 'same-origin',
-                'Sec-Fetch-Mode': 'cors',
-                'Sec-Fetch-Dest': 'empty',
-                'X-Requested-With': 'XMLHttpRequest'
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36',
+                'sec-ch-ua': '"Chromium";v="147", "Not.A/Brand";v="8"',
+                'sec-ch-ua-mobile': '?0',
+                'sec-ch-ua-platform': '"Windows"'
             },
-            timeout: 15000
+            timeout: 20000
         });
 
         const clientes = response.data.data
@@ -133,14 +100,14 @@ async function processarDadosSigma(userId) {
             let count = 0;
 
             clientes.forEach((c) => {
-                const exp = c.expiration || c.expiry || c.expires_at || c.vencimento || c.due_date;
+                const exp = c.expiration || c.expiry || c.expires_at || c.vencimento || c.due_date || c.expiryDate;
                 if (exp) {
                     const dtVenc = new Date(exp);
                     dtVenc.setHours(0, 0, 0, 0);
                     const diffDays = Math.ceil((dtVenc - hoje) / (1000 * 60 * 60 * 24));
                     if (regua.includes(diffDays)) {
                         const nome = c.notes || c.name || c.username || 'Sem nome';
-                        const zap = c.whatsapp || c.phone || c.telefone || 'N/A';
+                        const zap = c.whatsapp || c.phone || c.telefone || c.mobile || 'N/A';
                         log(`📍 [DIA ${diffDays > 0 ? '+' : ''}${diffDays}] ${nome} | Zap: ${zap}`);
                         count++;
                     }
@@ -149,7 +116,7 @@ async function processarDadosSigma(userId) {
 
             log(`🏆 Varredura finalizada. ${count} cliente(s) encontrado(s) na régua.`);
         } else {
-            log(`⚠️ Resposta recebida mas formato inesperado.`);
+            log(`⚠️ Formato de resposta inesperado.`);
             log(`🔍 Chaves recebidas: ${Object.keys(response.data || {}).join(', ')}`);
         }
 
@@ -157,17 +124,16 @@ async function processarDadosSigma(userId) {
         const status = e.response?.status;
         const body = String(e.response?.data || '').substring(0, 200);
 
-        if (status === 400) {
-            log(`❌ Erro 400: Header ainda muito grande ou requisição inválida.`);
-            log(`📋 Detalhe: ${body}`);
-        } else if (status === 401) {
-            log(`❌ Erro 401: Cookie expirado. Reabra o Sigma para renovar.`);
+        if (status === 401) {
+            log(`❌ Erro 401: Token expirado. Clique em 'Clientes' no Sigma para renovar.`);
+            // Limpa o token expirado para forçar renovação
+            await db.run('UPDATE users SET bearer_token = NULL WHERE id = ?', [userId]);
         } else if (status === 403) {
-            log(`❌ Erro 403: Acesso negado. Verifique permissões do usuário no Sigma.`);
+            log(`❌ Erro 403: Sem permissão. Verifique o usuário no Sigma.`);
         } else if (status === 404) {
-            log(`❌ Erro 404: Endpoint não encontrado. Clique em 'Clientes' no Sigma novamente.`);
+            log(`❌ Erro 404: Rota não encontrada: ${user.endpoint_clientes}`);
         } else {
-            log(`❌ Erro: ${status || e.message}`);
+            log(`❌ Erro ${status || e.message}`);
             log(`📋 Detalhe: ${body}`);
         }
     }
@@ -177,19 +143,21 @@ async function processarDadosSigma(userId) {
 // ROTAS
 // ─────────────────────────────────────────────
 
-app.post('/api/sync-cookie', async (req, res) => {
-    const cookie = req.body.cookie;
+// Recebe o Bearer Token capturado pela extensão
+app.post('/api/sync-token', async (req, res) => {
+    const token = req.body.token;
 
-    if (!cookie || cookie.trim() === '') {
-        return res.json({ success: false, reason: 'Cookie vazio ignorado' });
+    if (!token || token.trim() === '') {
+        return res.json({ success: false, reason: 'Token vazio ignorado' });
     }
 
-    await db.run('UPDATE users SET cookie_sigma = ? WHERE id = 1', [cookie.trim()]);
-    io.to('room_1').emit('novo_log', `[${new Date().toLocaleTimeString()}] 🔑 Cookie sincronizado com sucesso!`);
+    await db.run('UPDATE users SET bearer_token = ? WHERE id = 1', [token.trim()]);
+    io.to('room_1').emit('novo_log', `[${new Date().toLocaleTimeString()}] 🔑 Bearer Token sincronizado!`);
     processarComDebounce(1);
     res.json({ success: true });
 });
 
+// Recebe o endpoint capturado pela extensão
 app.post('/api/sync-endpoint', async (req, res) => {
     const fullUrl = req.body.fullUrl || '';
 
@@ -197,16 +165,28 @@ app.post('/api/sync-endpoint', async (req, res) => {
         return res.json({ success: false, reason: 'URL vazia' });
     }
 
-    const isValid = /\/(customers|clientes|clients|usuarios|users|membros)(\/|$|\?)/i.test(fullUrl);
+    const isValid = /\/api\/customers/i.test(fullUrl);
     if (!isValid) {
-        return res.json({ success: false, reason: 'Endpoint ignorado (não é rota de clientes)' });
+        return res.json({ success: false, reason: 'Endpoint ignorado' });
     }
 
     const clean = fullUrl.split('?')[0];
+
+    // Só salva se mudou
+    const atual = await db.get('SELECT endpoint_clientes FROM users WHERE id = 1');
+    if (atual?.endpoint_clientes === clean) {
+        return res.json({ success: true, reason: 'Sem mudança' });
+    }
+
     await db.run('UPDATE users SET endpoint_clientes = ? WHERE id = 1', [clean]);
-    io.to('room_1').emit('novo_log', `[${new Date().toLocaleTimeString()}] 🎯 Rota válida capturada: ${clean}`);
+    io.to('room_1').emit('novo_log', `[${new Date().toLocaleTimeString()}] 🎯 Endpoint capturado: ${clean}`);
     processarComDebounce(1);
     res.json({ success: true });
+});
+
+// Mantido para compatibilidade — redireciona para sync-token
+app.post('/api/sync-cookie', async (req, res) => {
+    res.json({ success: false, reason: 'Método descontinuado. Use /api/sync-token.' });
 });
 
 app.post('/api/login', (req, res) => {

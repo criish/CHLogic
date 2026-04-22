@@ -7,6 +7,7 @@ database.sqlite
 # Logs de erro e execução
 *.log
 cobranca.log
+rastreador.js
 
 # Pastas de autenticação (IMPORTANTE: evita expor sessões de WhatsApp/Bots)
 .wwebjs_auth/
