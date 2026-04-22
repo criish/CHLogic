@@ -8,24 +8,25 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const qrcode = require('qrcode');
-const axios = require('axios'); 
+const axios = require('axios');
 const session = require('express-session');
 const sqlite3 = require('sqlite3');
 const { open } = require('sqlite');
 const pino = require('pino');
-const path = require('path');
+
+// Módulos para enganar o Cloudflare
+const puppeteer = require('puppeteer-extra');
+const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+puppeteer.use(StealthPlugin());
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
-// Configurações de Segurança
-const ADMIN_USER = 'admin';
-const ADMIN_PASS = 'CH@dmin2026';
-
 let db;
 const activeClients = {};
 
+// Banco de Dados
 (async () => {
     db = await open({ filename: './database.sqlite', driver: sqlite3.Database });
     await db.exec(`CREATE TABLE IF NOT EXISTS users (
@@ -50,7 +51,7 @@ app.use(express.json());
 app.use(express.static('public'));
 
 // ==========================================
-// 🚀 MOTOR DE DISPARO (MODO API - SEM NAVEGADOR)
+// 🚀 MOTOR SNIPER (MODO HÍBRIDO: STEALTH + API)
 // ==========================================
 async function dispararCobrancaSaaS(userId) {
     const user = await db.get('SELECT * FROM users WHERE id = ?', [userId]);
@@ -61,56 +62,71 @@ async function dispararCobrancaSaaS(userId) {
     const log = (msg) => {
         const dataHora = new Date().toLocaleTimeString('pt-BR');
         const linha = `[${dataHora}] ${msg}`;
-        console.log(`[ID ${userId}] ${linha}`); 
-        io.to(`room_${userId}`).emit('novo_log', linha); 
+        console.log(`[ID ${userId}] ${linha}`);
+        io.to(`room_${userId}`).emit('novo_log', linha);
     };
 
+    let browser;
     try {
-        // --- LIMPEZA INTELIGENTE DA URL ---
-        // Se o usuário colou "https://site.pro/#/login", pegamos apenas "https://site.pro"
-        let urlBase = user.painel_url.split('/#')[0]; 
-        urlBase = urlBase.replace(/\/$/, ''); // Remove a última barra se existir
-        
-        const loginUrl = `${urlBase}/api/auth/login`;
-        log(`📡 Conectando ao Sigma: ${loginUrl}`);
-        
-        // Login direto via HTTP (Consome 0% de RAM gráfica)
-        const response = await axios.post(loginUrl, {
-            captcha: "not-a-robot",
-            captchaChecked: true,
-            username: user.usuario_sigma,
-            password: user.senha_sigma,
-            twofactor_code: "",
-            twofactor_recovery_code: "",
-            twofactor_trusted_device_id: ""
-        }, {
-            headers: {
-                'Content-Type': 'application/json',
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-            }
+        let urlBase = user.painel_url.split('/#')[0].replace(/\/$/, '');
+        log("🕵️ Iniciando bypass do Cloudflare...");
+
+        browser = await puppeteer.launch({
+            headless: true,
+            executablePath: '/usr/bin/chromium-browser',
+            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--single-process']
         });
 
-        if (response.status === 200) {
-            log(`✅ LOGIN REALIZADO COM SUCESSO!`);
-            log(`👤 Bem-vindo, ${response.data.user?.username || user.usuario_sigma}`);
-            log(`⏳ Próximo passo: Mapear a lista de clientes para disparar.`);
+        const page = await browser.newPage();
+        
+        // Define um User-Agent real para não ser bloqueado
+        await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+
+        await page.goto(`${urlBase}/#/sign-in`, { waitUntil: 'networkidle2', timeout: 60000 });
+
+        log("📝 Preenchendo login no Sigma...");
+        await page.type('input[type="text"]', user.usuario_sigma, { delay: 100 });
+        await page.type('input[type="password"]', user.senha_sigma, { delay: 100 });
+        
+        // Clica no botão e espera a navegação
+        await Promise.all([
+            page.click('button[type="submit"]'),
+            page.waitForNavigation({ waitUntil: 'networkidle2' })
+        ]);
+
+        // Captura os Cookies de autenticação
+        const cookies = await page.cookies();
+        const cookieStr = cookies.map(c => `${c.name}=${c.value}`).join('; ');
+
+        if (cookieStr.includes('session') || cookies.length > 0) {
+            log("✅ Login realizado! Cookie de acesso capturado.");
+            
+            // Agora fechamos o navegador para liberar RAM na Oracle
+            await browser.close();
+            browser = null;
+
+            log("📡 Validando sessão via API leve...");
+            const res = await axios.get(`${urlBase}/api/auth/me`, {
+                headers: { 
+                    'Cookie': cookieStr,
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                }
+            });
+
+            log(`👤 Sessão ativa para: ${res.data.user?.username || user.usuario_sigma}`);
+            log(`⏳ Aguardando mapeamento da lista de clientes.`);
+        } else {
+            throw new Error("Não foi possível capturar o cookie de sessão.");
         }
 
     } catch (e) {
-        const status = e.response?.status;
-        const msgErro = e.response?.data?.message || e.message;
-
-        if (status === 404) {
-            log(`❌ Erro 404: O endereço da API não foi encontrado.`);
-            log(`💡 Verifique se a URL do painel está correta (ex: https://ufoplay.sigmab.pro)`);
-        } else {
-            log(`❌ Falha no login: ${msgErro}`);
-        }
+        log(`❌ Falha no Bypass: ${e.message}`);
+        if (browser) await browser.close();
     }
 }
 
 // ==========================================
-// 📱 CONEXÃO WHATSAPP (BAILEYS - LEVE)
+// 📱 WHATSAPP (BAILEYS)
 // ==========================================
 async function startWhatsApp(userId) {
     if (activeClients[userId]) return;
@@ -121,35 +137,31 @@ async function startWhatsApp(userId) {
     const sock = makeWASocket({
         version,
         auth: state,
-        logger: pino({ level: 'silent' }),
-        printQRInTerminal: false // Desativado para evitar poluição no terminal
+        logger: pino({ level: 'silent' })
     });
 
     sock.ev.on('creds.update', saveCreds);
 
     sock.ev.on('connection.update', (update) => {
         const { connection, lastDisconnect, qr } = update;
-
         if (qr) {
-            qrcode.toDataURL(qr).then(url => {
-                io.to(`room_${userId}`).emit('qr_code', url);
-            });
+            qrcode.toDataURL(qr).then(url => io.to(`room_${userId}`).emit('qr_code', url));
         }
-
+        if (connection === 'open') {
+            console.log(`[ID ${userId}] WhatsApp Conectado!`);
+            activeClients[userId] = sock;
+            io.to(`room_${userId}`).emit('status_update', { conectado: true });
+        }
         if (connection === 'close') {
             const shouldReconnect = lastDisconnect.error?.output?.statusCode !== DisconnectReason.loggedOut;
             delete activeClients[userId];
             if (shouldReconnect) startWhatsApp(userId);
-        } else if (connection === 'open') {
-            console.log(`[ID ${userId}] WhatsApp Conectado!`);
-            activeClients[userId] = sock;
-            io.to(`room_${userId}`).emit('status_update', { conectado: true });
         }
     });
 }
 
 // ==========================================
-// 🔑 ROTAS DE API
+// 🔑 ROTAS E SOCKETS
 // ==========================================
 app.post('/api/login', async (req, res) => {
     const row = await db.get('SELECT * FROM users WHERE username = ? AND password = ?', [req.body.user, req.body.pass]);
@@ -171,9 +183,6 @@ app.get('/api/config', async (req, res) => {
     res.json(config || {});
 });
 
-// ==========================================
-// ⚡ COMUNICAÇÃO EM TEMPO REAL
-// ==========================================
 io.on('connection', (socket) => {
     socket.on('join_room', (userId) => {
         socket.join(`room_${userId}`);
@@ -188,4 +197,4 @@ io.on('connection', (socket) => {
     });
 });
 
-server.listen(3000, () => console.log("🚀 CH Logic (Modo Sniper) na porta 3000"));
+server.listen(3000, () => console.log("🚀 CH Logic (Híbrido Stealth) na porta 3000"));

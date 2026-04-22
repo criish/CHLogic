@@ -1,11 +1,17 @@
 {
   "dependencies": {
+    "@whiskeysockets/baileys": "^7.0.0-rc.9",
+    "axios": "^1.15.2",
     "body-parser": "^2.2.2",
     "express": "^5.2.1",
     "express-session": "^1.19.0",
+    "libsignal-node": "^2.0.1",
     "node-cron": "^4.2.1",
     "path": "^0.12.7",
+    "pino": "^10.3.1",
     "puppeteer": "^24.42.0",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
     "qrcode": "^1.5.4",
     "socket.io": "^4.8.3",
     "sqlite": "^5.1.1",
