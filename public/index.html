@@ -2,100 +2,132 @@
 <html lang="pt-br">
 <head>
     <meta charset="UTF-8">
-    <title>CH Logic | Painel</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CH Logic | Painel de Automação</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="/socket.io/socket.io.js"></script>
     <style>
-        body { background: #0f172a; color: white; font-family: sans-serif; padding: 20px; }
-        .card { background: #1e293b; padding: 20px; border-radius: 10px; margin-bottom: 20px; }
-        .log-box { background: #000; color: #22c55e; padding: 15px; border-radius: 5px; height: 300px; overflow-y: auto; font-family: monospace; font-size: 0.85rem; }
-        input { width: 100%; padding: 10px; margin: 5px 0 15px 0; border-radius: 5px; border: 1px solid #334155; background: #0f172a; color: white; box-sizing: border-box; }
-        button { background: #22c55e; color: white; border: none; padding: 12px 25px; border-radius: 5px; cursor: pointer; font-weight: bold; width: 100%; }
-        .status-badge { display: inline-block; padding: 5px 10px; border-radius: 15px; font-size: 0.8rem; font-weight: bold; background: #334155; }
-        .hidden { display: none; }
+        body { background-color: #0f172a; color: white; font-family: 'Inter', sans-serif; }
+        .card { background-color: #1e293b; border: none; color: white; border-radius: 12px; margin-bottom: 20px; }
+        .log-container { background: black; color: #00ff00; font-family: monospace; height: 300px; overflow-y: auto; padding: 15px; border-radius: 8px; border: 1px solid #334155; }
+        .status-badge { padding: 5px 12px; border-radius: 20px; font-size: 0.8rem; }
+        .bg-success { background-color: #22c55e !important; }
+        .bg-danger { background-color: #ef4444 !important; }
+        #qrcode { width: 250px; height: 250px; background: white; margin: 0 auto; display: none; padding: 10px; border-radius: 8px; }
     </style>
 </head>
 <body>
-    <div style="display: flex; justify-content: space-between; align-items: center;">
-        <h1 id="welcome">Carregando...</h1>
-        <div id="status-sistema" class="status-badge">Aguardando Início</div>
+
+<nav class="navbar navbar-dark bg-dark mb-4">
+    <div class="container">
+        <span class="navbar-brand mb-0 h1">CH Logic | Painel</span>
+        <span id="welcome-msg" class="text-muted">Carregando...</span>
     </div>
+</nav>
 
-    <div class="card" id="whatsapp-card">
-        <p id="status-texto">Verificando conexão...</p>
-        <img id="qr-container" src="" style="display:none; margin: 0 auto; width: 200px; background: white; padding: 10px;">
+<div class="container">
+    <div class="row">
+        <div class="col-md-5">
+            <div class="card p-4">
+                <h5 class="mb-3">Configurações Sigma</h5>
+                <div class="mb-3">
+                    <label class="form-label text-muted">URL do seu Painel (ex: site.pro)</label>
+                    <input type="text" id="painel_url" class="form-control bg-dark border-secondary text-white" placeholder="https://seu-sigma.pro">
+                </div>
+                <button onclick="salvarConfig()" class="btn btn-success w-100 fw-bold">Salvar e Sincronizar Painel</button>
+                
+                <div class="mt-4 text-center">
+                    <p class="mb-2 text-muted">Status WhatsApp</p>
+                    <div id="qrcode"></div>
+                    <span id="wa-status" class="status-badge bg-danger">Desconectado</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-7">
+            <div class="card p-4">
+                <h5 class="mb-3">Logs do Sistema</h5>
+                <div id="logs" class="log-container">
+                    <div>> Aguardando comandos...</div>
+                </div>
+            </div>
+        </div>
     </div>
+</div>
 
-    <div class="card hidden" id="sigma-card">
-        <h3>Configurações Sigma</h3>
-        <input type="text" id="sigma_url" placeholder="URL do Painel Sigma">
-        <input type="text" id="sigma_user" placeholder="Usuário">
-        <input type="password" id="sigma_pass" placeholder="Senha">
-        <button onclick="salvarConfig()">Salvar e Iniciar Robo</button>
-    </div>
+<script>
+    const socket = io();
+    let meuId = null;
 
-    <div class="card">
-        <div class="log-box" id="log-area"><div>> Aguardando comandos...</div></div>
-    </div>
-
-    <script src="/socket.io/socket.io.js"></script>
-    <script>
-        let currentUserId = null;
-        const socket = io();
-
-        // 1. Carrega identidade e preenche campos
-        fetch('/api/me').then(res => res.json()).then(user => {
-            currentUserId = user.id;
-            document.getElementById('welcome').innerText = `Olá, ${user.name}!`;
-            socket.emit('join_room', user.id);
-            carregarDadosSalvos();
+    // 1. Verifica se está logado e pega os dados
+    fetch('/api/me')
+        .then(res => {
+            if (res.status === 401) window.location.href = '/login.html';
+            return res.json();
+        })
+        .then(data => {
+            meuId = data.id;
+            document.getElementById('welcome-msg').innerText = `Logado: ${data.name || 'Usuário'}`;
+            socket.emit('join_room', meuId);
+            carregarConfig();
         });
 
-        // 2. Busca o que já está no banco de dados
-        function carregarDadosSalvos() {
-            fetch('/api/config').then(res => res.json()).then(data => {
-                if (data.painel_url) {
-                    document.getElementById('sigma_url').value = data.painel_url;
-                    document.getElementById('sigma_user').value = data.usuario_sigma;
-                    document.getElementById('sigma_pass').value = data.senha_sigma;
-                }
+    // 2. Carrega configuração salva
+    function carregarConfig() {
+        fetch('/api/config')
+            .then(res => res.json())
+            .then(data => {
+                if (data.painel_url) document.getElementById('painel_url').value = data.painel_url;
             });
+    }
+
+    // 3. Envia configuração e solicita abertura do Sigma
+    function salvarConfig() {
+        const url = document.getElementById('painel_url').value;
+        if (!url) return alert("Insira a URL do painel");
+        
+        addLog("💾 Salvando configurações...");
+        socket.emit('save_config', { userId: meuId, url: url });
+    }
+
+    // 4. Lógica de abrir a aba do Sigma para a extensão agir
+    socket.on('open_sigma_tab', (data) => {
+        addLog("🕒 Abrindo painel Sigma...");
+        addLog("👉 Faça o login na nova aba para sincronizar automaticamente.");
+        
+        // Abre a aba do Sigma. A extensão vai detectar o login e mandar o cookie.
+        window.open(data.url, '_blank');
+    });
+
+    // 5. Recebe Logs do Servidor
+    socket.on('novo_log', (msg) => {
+        addLog(msg);
+    });
+
+    // 6. Atualização de QR Code e Status
+    socket.on('qr_code', (url) => {
+        const qrImg = document.getElementById('qrcode');
+        qrImg.style.display = 'block';
+        qrImg.innerHTML = `<img src="${url}" style="width:100%">`;
+        addLog("📱 Escaneie o QR Code para conectar o WhatsApp.");
+    });
+
+    socket.on('status_update', (data) => {
+        if (data.conectado) {
+            document.getElementById('wa-status').innerText = "Conectado";
+            document.getElementById('wa-status').className = "status-badge bg-success";
+            document.getElementById('qrcode').style.display = 'none';
         }
+    });
 
-        socket.on('qr_code', (img) => {
-            document.getElementById('qr-container').src = img;
-            document.getElementById('qr-container').style.display = 'block';
-            document.getElementById('status-texto').innerText = "Escaneie o QR Code:";
-        });
+    function addLog(msg) {
+        const logsDiv = document.getElementById('logs');
+        const novaLinha = document.createElement('div');
+        novaLinha.innerText = `> ${msg}`;
+        logsDiv.appendChild(novaLinha);
+        logsDiv.scrollTop = logsDiv.scrollHeight;
+    }
+</script>
 
-        socket.on('status_update', (status) => {
-            if(status.conectado) {
-                document.getElementById('whatsapp-card').classList.add('hidden');
-                document.getElementById('sigma-card').classList.remove('hidden');
-                document.getElementById('status-sistema').innerText = "WhatsApp Online";
-            }
-        });
-
-        socket.on('config_salva', (res) => {
-            if(res.sucesso) {
-                document.getElementById('status-sistema').innerText = res.modoTeste ? "MODO TESTE" : "MODO REAL";
-                document.getElementById('status-sistema').style.background = res.modoTeste ? "#f59e0b" : "#22c55e";
-                alert('Configurações salvas no servidor!');
-            }
-        });
-
-        socket.on('novo_log', (msg) => {
-            const area = document.getElementById('log-area');
-            area.innerHTML += `<div>${msg}</div>`;
-            area.scrollTop = area.scrollHeight;
-        });
-
-        function salvarConfig() {
-            socket.emit('save_config', {
-                userId: currentUserId,
-                url: document.getElementById('sigma_url').value,
-                userSigma: document.getElementById('sigma_user').value,
-                passSigma: document.getElementById('sigma_pass').value
-            });
-        }
-    </script>
 </body>
 </html>
