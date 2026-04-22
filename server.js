@@ -105,11 +105,13 @@ async function dispararCobrancaSaaS(userId) {
 
     log(`🚀 Iniciando em MODO ${MODO_TESTE_SISTEMA ? 'TESTE (SIMULAÇÃO)' : 'REAL'}`);
 
-    const browser = await puppeteer.launch({
-        headless: true,
-        executablePath: '/usr/bin/chromium-browser',
-        args: PUPPETEER_ARGS
-    });
+    // Localize este bloco por volta da linha 108 no seu server.js
+const browser = await puppeteer.launch({
+    headless: true,
+    executablePath: '/usr/bin/chromium-browser',
+    args: PUPPETEER_ARGS,
+    timeout: 60000 // Adicione esta linha (aumenta para 60 segundos)
+});
 
     try {
         const page = await browser.newPage();
