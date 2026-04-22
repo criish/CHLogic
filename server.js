@@ -14,7 +14,7 @@ const sqlite3 = require('sqlite3');
 const { open } = require('sqlite');
 const pino = require('pino');
 
-// Módulos para enganar o Cloudflare
+// Módulos para enganar o Cloudflare (Stealth Mode)
 const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 puppeteer.use(StealthPlugin());
@@ -26,7 +26,7 @@ const io = new Server(server);
 let db;
 const activeClients = {};
 
-// Banco de Dados
+// Inicialização do Banco de Dados
 (async () => {
     db = await open({ filename: './database.sqlite', driver: sqlite3.Database });
     await db.exec(`CREATE TABLE IF NOT EXISTS users (
@@ -69,64 +69,77 @@ async function dispararCobrancaSaaS(userId) {
     let browser;
     try {
         let urlBase = user.painel_url.split('/#')[0].replace(/\/$/, '');
-        log("🕵️ Iniciando bypass do Cloudflare...");
+        log("🕵️ Iniciando bypass do Cloudflare (Modo Furtivo)...");
 
         browser = await puppeteer.launch({
-            headless: true,
+            headless: true, // Mantenha true para a Oracle não travar
             executablePath: '/usr/bin/chromium-browser',
-            args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--single-process']
+            args: [
+                '--no-sandbox', 
+                '--disable-setuid-sandbox', 
+                '--disable-dev-shm-usage', 
+                '--single-process',
+                '--disable-extensions'
+            ]
         });
 
         const page = await browser.newPage();
         
-        // Define um User-Agent real para não ser bloqueado
+        // Simula um navegador real do Windows
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
-        await page.goto(`${urlBase}/#/sign-in`, { waitUntil: 'networkidle2', timeout: 60000 });
+        log("🌐 Acessando página de login do Sigma...");
+        await page.goto(`${urlBase}/#/sign-in`, { waitUntil: 'networkidle2', timeout: 90000 });
 
-        log("📝 Preenchendo login no Sigma...");
-        await page.type('input[type="text"]', user.usuario_sigma, { delay: 100 });
-        await page.type('input[type="password"]', user.senha_sigma, { delay: 100 });
+        log("⏳ Aguardando campos de entrada...");
+        // Usando o seletor exato que o seu script de captura detectou
+        await page.waitForSelector('input[name="username"]', { timeout: 40000 });
+
+        log("📝 Preenchendo credenciais...");
+        await page.type('input[name="username"]', user.usuario_sigma, { delay: 150 });
+        await page.type('input[name="password"]', user.senha_sigma, { delay: 150 });
         
-        // Clica no botão e espera a navegação
+        log("🔘 Clicando no botão de login...");
         await Promise.all([
             page.click('button[type="submit"]'),
-            page.waitForNavigation({ waitUntil: 'networkidle2' })
+            page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 60000 })
         ]);
 
-        // Captura os Cookies de autenticação
+        // Captura os Cookies após o login bem-sucedido
         const cookies = await page.cookies();
         const cookieStr = cookies.map(c => `${c.name}=${c.value}`).join('; ');
 
         if (cookieStr.includes('session') || cookies.length > 0) {
-            log("✅ Login realizado! Cookie de acesso capturado.");
+            log("✅ Bypass concluído! Cookie capturado.");
             
-            // Agora fechamos o navegador para liberar RAM na Oracle
+            // Fecha o navegador imediatamente para economizar recursos da Oracle
             await browser.close();
             browser = null;
 
-            log("📡 Validando sessão via API leve...");
+            log("📡 Validando sessão via API...");
             const res = await axios.get(`${urlBase}/api/auth/me`, {
                 headers: { 
                     'Cookie': cookieStr,
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    'Accept': 'application/json'
                 }
             });
 
-            log(`👤 Sessão ativa para: ${res.data.user?.username || user.usuario_sigma}`);
-            log(`⏳ Aguardando mapeamento da lista de clientes.`);
+            log(`👤 Login confirmado para: ${res.data.user?.username || user.usuario_sigma}`);
+            log(`⏳ Próximo passo: Coletar lista de clientes para disparar mensagens.`);
+            
         } else {
-            throw new Error("Não foi possível capturar o cookie de sessão.");
+            throw new Error("Login realizado, mas nenhum cookie de sessão foi encontrado.");
         }
 
     } catch (e) {
-        log(`❌ Falha no Bypass: ${e.message}`);
+        log(`❌ Falha no Processo: ${e.message}`);
         if (browser) await browser.close();
     }
 }
 
 // ==========================================
-// 📱 WHATSAPP (BAILEYS)
+// 📱 CONEXÃO WHATSAPP (BAILEYS)
 // ==========================================
 async function startWhatsApp(userId) {
     if (activeClients[userId]) return;
@@ -137,7 +150,8 @@ async function startWhatsApp(userId) {
     const sock = makeWASocket({
         version,
         auth: state,
-        logger: pino({ level: 'silent' })
+        logger: pino({ level: 'silent' }),
+        printQRInTerminal: false
     });
 
     sock.ev.on('creds.update', saveCreds);
@@ -161,7 +175,7 @@ async function startWhatsApp(userId) {
 }
 
 // ==========================================
-// 🔑 ROTAS E SOCKETS
+// 🔑 ROTAS E INTERFACE
 // ==========================================
 app.post('/api/login', async (req, res) => {
     const row = await db.get('SELECT * FROM users WHERE username = ? AND password = ?', [req.body.user, req.body.pass]);

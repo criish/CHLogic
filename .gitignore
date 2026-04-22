@@ -11,6 +11,7 @@ cobranca.log
 # Pastas de autenticação (IMPORTANTE: evita expor sessões de WhatsApp/Bots)
 .wwebjs_auth/
 .wwebjs_cache/
+auth_info_1
 
 # Arquivos de ambiente/senhas
 .env
