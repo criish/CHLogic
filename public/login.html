@@ -4,32 +4,153 @@
     <meta charset="UTF-8">
     <title>Login | CH Logic</title>
     <style>
-        body { background: #0f172a; color: white; font-family: 'Segoe UI', sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
-        .card { background: #1e293b; padding: 2rem; border-radius: 1rem; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1); width: 320px; }
-        input { width: 100%; padding: 0.75rem; margin: 0.5rem 0; border-radius: 0.5rem; border: 1px solid #334155; background: #0f172a; color: white; box-sizing: border-box; }
-        button { width: 100%; padding: 0.75rem; background: #22c55e; border: none; border-radius: 0.5rem; color: white; font-weight: bold; cursor: pointer; margin-top: 1rem; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            background: #0f1117;
+            color: white;
+            font-family: 'Segoe UI', sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+        }
+        .card {
+            background: #161b27;
+            border: 1px solid #1e2535;
+            padding: 2.5rem;
+            border-radius: 16px;
+            width: 340px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+        }
+        .logo {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+        .logo h1 {
+            font-size: 1.8rem;
+            color: #00c896;
+            font-weight: 800;
+            letter-spacing: 2px;
+        }
+        .logo p {
+            font-size: 0.82rem;
+            color: #556;
+            margin-top: 4px;
+        }
+        .form-group {
+            margin-bottom: 14px;
+        }
+        .form-group label {
+            display: block;
+            font-size: 0.78rem;
+            color: #778;
+            margin-bottom: 6px;
+            font-weight: 500;
+        }
+        input {
+            width: 100%;
+            padding: 11px 14px;
+            border-radius: 8px;
+            border: 1px solid #1e2535;
+            background: #0f1117;
+            color: white;
+            font-size: 0.9rem;
+            outline: none;
+            transition: border 0.2s;
+        }
+        input:focus { border-color: #00c896; }
+        button {
+            width: 100%;
+            padding: 12px;
+            background: #00c896;
+            border: none;
+            border-radius: 8px;
+            color: #000;
+            font-weight: 700;
+            font-size: 0.95rem;
+            cursor: pointer;
+            margin-top: 8px;
+            transition: opacity 0.2s;
+        }
+        button:hover { opacity: 0.9; }
+        .erro {
+            color: #e74c3c;
+            font-size: 0.82rem;
+            text-align: center;
+            margin-top: 12px;
+            display: none;
+        }
+        .footer {
+            text-align: center;
+            margin-top: 1.5rem;
+            font-size: 0.75rem;
+            color: #334;
+        }
     </style>
 </head>
 <body>
     <div class="card">
-        <h2 style="text-align: center; color: #22c55e;">CH LOGIC</h2>
-        <p style="text-align: center; font-size: 0.9rem; color: #94a3b8;">Acesse seu painel de automação</p>
-        <input type="text" id="user" placeholder="Usuário">
-        <input type="password" id="pass" placeholder="Senha">
-        <button onclick="login()">Entrar no Sistema</button>
+        <div class="logo">
+            <h1>CH LOGIC</h1>
+            <p>Painel de Automação IPTV</p>
+        </div>
+
+        <div class="form-group">
+            <label>Usuário</label>
+            <input type="text" id="user" placeholder="seu_usuario" autocomplete="username" />
+        </div>
+        <div class="form-group">
+            <label>Senha</label>
+            <input type="password" id="pass" placeholder="••••••••" autocomplete="current-password"
+                   onkeydown="if(event.key==='Enter') login()" />
+        </div>
+
+        <button onclick="login()" id="btnLogin">Entrar no Sistema</button>
+        <p class="erro" id="erro"></p>
+
+        <div class="footer">CH Logic © 2026 | Todos os direitos reservados</div>
     </div>
 
     <script>
         async function login() {
-            const user = document.getElementById('user').value;
+            const user = document.getElementById('user').value.trim();
             const pass = document.getElementById('pass').value;
-            const res = await fetch('/api/login', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ user, pass })
-            });
-            if (res.ok) window.location.href = '/';
-            else alert('Usuário ou senha inválidos!');
+            const erro = document.getElementById('erro');
+            const btn = document.getElementById('btnLogin');
+
+            if (!user || !pass) {
+                erro.textContent = 'Preencha usuário e senha.';
+                erro.style.display = 'block';
+                return;
+            }
+
+            btn.textContent = 'Entrando...';
+            btn.disabled = true;
+            erro.style.display = 'none';
+
+            try {
+                const res = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user, pass })
+                });
+
+                const data = await res.json();
+
+                if (res.ok) {
+                    window.location.href = '/';
+                } else {
+                    erro.textContent = data.error || 'Usuário ou senha inválidos.';
+                    erro.style.display = 'block';
+                    btn.textContent = 'Entrar no Sistema';
+                    btn.disabled = false;
+                }
+            } catch(e) {
+                erro.textContent = 'Erro de conexão com o servidor.';
+                erro.style.display = 'block';
+                btn.textContent = 'Entrar no Sistema';
+                btn.disabled = false;
+            }
         }
     </script>
 </body>

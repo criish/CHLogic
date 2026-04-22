@@ -4,105 +4,202 @@
     <meta charset="UTF-8">
     <title>CH Logic | Admin</title>
     <style>
-        body { font-family: sans-serif; padding: 20px; background: #f4f4f4; }
-        .container { max-width: 800px; margin: auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-        input { padding: 8px; margin-right: 10px; border: 1px solid #ccc; }
-        button { cursor: pointer; padding: 8px 15px; }
-        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-        th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
-        th { background: #eee; }
-        .btn-off { background: #ff4444; color: white; border: none; }
-        .btn-on { background: #22c55e; color: white; border: none; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', sans-serif; background: #0f1117; color: #e0e0e0; min-height: 100vh; display: flex; justify-content: center; padding: 40px 20px; }
+        .container { width: 100%; max-width: 860px; }
+        .card { background: #161b27; border: 1px solid #1e2535; border-radius: 12px; padding: 28px; margin-bottom: 20px; }
+        h3 { font-size: 0.85rem; color: #778; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 16px; }
+        .form-row { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+        .form-group { flex: 1; min-width: 160px; }
+        .form-group label { display: block; font-size: 0.78rem; color: #556; margin-bottom: 5px; }
+        input { width: 100%; padding: 10px 12px; background: #0f1117; border: 1px solid #1e2535; border-radius: 8px; color: #fff; font-size: 0.88rem; outline: none; }
+        input:focus { border-color: #00c896; }
+        .btn { padding: 10px 20px; border: none; border-radius: 8px; font-size: 0.85rem; font-weight: 600; cursor: pointer; transition: opacity 0.2s; white-space: nowrap; }
+        .btn:hover { opacity: 0.85; }
+        .btn-primary { background: #00c896; color: #000; }
+        .btn-danger { background: #e74c3c; color: #fff; }
+        .btn-success { background: #22c55e; color: #000; }
+        .btn-sm { padding: 5px 12px; font-size: 0.78rem; }
+        table { width: 100%; border-collapse: collapse; }
+        th { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 1px; color: #445; padding: 10px 12px; text-align: left; border-bottom: 1px solid #1e2535; }
+        td { padding: 12px; border-bottom: 1px solid #141820; font-size: 0.85rem; vertical-align: middle; }
+        tr:last-child td { border-bottom: none; }
+        tr:hover td { background: #1a2030; }
+        .status-on { color: #00c896; font-weight: 600; }
+        .status-off { color: #e74c3c; font-weight: 600; }
+        .logo { font-size: 1.3rem; font-weight: 800; color: #00c896; letter-spacing: 2px; margin-bottom: 4px; }
+        .subtitle { font-size: 0.8rem; color: #445; }
+        #loginCard { display: flex; justify-content: center; align-items: center; min-height: 80vh; width: 100%; }
+        .login-box { background: #161b27; border: 1px solid #1e2535; border-radius: 16px; padding: 36px; width: 320px; }
+        .login-box .form-group { margin-bottom: 14px; }
+        .login-box .btn { width: 100%; padding: 12px; margin-top: 6px; }
+        .erro { color: #e74c3c; font-size: 0.8rem; margin-top: 10px; text-align: center; display: none; }
+        .actions { display: flex; gap: 6px; }
+        .add-msg { font-size: 0.8rem; margin-top: 10px; display: none; }
     </style>
 </head>
 <body>
-    <div id="login-admin" class="container">
-        <h2>Login Administrativo</h2>
-        <input type="text" id="adm_user" placeholder="Usuário Admin">
-        <input type="password" id="adm_pass" placeholder="Senha Admin">
-        <button onclick="loginAdmin()">Entrar</button>
+
+<div id="loginCard">
+    <div class="login-box">
+        <div class="logo">CH LOGIC</div>
+        <div class="subtitle" style="margin-bottom:24px">Painel Administrativo</div>
+        <div class="form-group">
+            <label>Usuário Admin</label>
+            <input type="text" id="adm_user" placeholder="admin" />
+        </div>
+        <div class="form-group">
+            <label>Senha</label>
+            <input type="password" id="adm_pass" placeholder="••••••••"
+                   onkeydown="if(event.key==='Enter') loginAdmin()" />
+        </div>
+        <button class="btn btn-primary" onclick="loginAdmin()">Entrar</button>
+        <p class="erro" id="loginErro"></p>
+    </div>
+</div>
+
+<div id="painelAdmin" class="container" style="display:none">
+    <div class="card" style="display:flex; justify-content:space-between; align-items:center; padding:16px 24px;">
+        <div>
+            <div class="logo">CH LOGIC</div>
+            <div class="subtitle">Painel Administrativo</div>
+        </div>
+        <button class="btn btn-danger btn-sm" onclick="sair()">Sair</button>
     </div>
 
-    <div id="painel-admin" class="container" style="display:none;">
-        <h2>Gerenciar Usuários</h2>
-        <div style="background: #eef; padding: 15px; margin-bottom: 20px;">
-            <h4>Novo Usuário</h4>
-            <input type="text" id="new_user" placeholder="Login do Cliente">
-            <input type="text" id="new_pass" placeholder="Senha do Cliente">
-            <button onclick="addUser()">Cadastrar Cliente</button>
+    <div class="card">
+        <h3>➕ Cadastrar Novo Cliente</h3>
+        <div class="form-row">
+            <div class="form-group">
+                <label>Login do Cliente</label>
+                <input type="text" id="new_user" placeholder="nome_cliente" />
+            </div>
+            <div class="form-group">
+                <label>Senha</label>
+                <input type="password" id="new_pass" placeholder="senha forte" />
+            </div>
+            <button class="btn btn-primary" onclick="addUser()">Cadastrar</button>
         </div>
+        <p id="addMsg" class="add-msg"></p>
+    </div>
 
+    <div class="card">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px">
+            <h3 style="margin:0">👥 Clientes Cadastrados</h3>
+            <button class="btn btn-sm" style="background:#1e2535;color:#aab" onclick="loadUsers()">↻ Atualizar</button>
+        </div>
         <table>
             <thead>
                 <tr>
-                    <th>ID</th>
-                    <th>Usuário</th>
-                    <th>Status</th>
-                    <th>Ações</th>
+                    <th>ID</th><th>Usuário</th><th>Horário</th><th>Status</th><th>Ações</th>
                 </tr>
             </thead>
-            <tbody id="user-list"></tbody>
+            <tbody id="userList"></tbody>
         </table>
-        <br>
-        <button onclick="location.reload()">Atualizar Lista</button>
     </div>
+</div>
 
-    <script>
-        async function loginAdmin() {
-            const user = document.getElementById('adm_user').value;
-            const pass = document.getElementById('adm_pass').value;
-            const res = await fetch('/api/admin/login', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({user, pass})
-            });
-            if (res.ok) {
-                document.getElementById('login-admin').style.display = 'none';
-                document.getElementById('painel-admin').style.display = 'block';
-                loadUsers();
-            } else { alert("Acesso negado"); }
+<script>
+    async function loginAdmin() {
+        const user = document.getElementById('adm_user').value;
+        const pass = document.getElementById('adm_pass').value;
+        const erro = document.getElementById('loginErro');
+        const res = await fetch('/api/admin/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user, pass })
+        });
+        if (res.ok) {
+            document.getElementById('loginCard').style.display = 'none';
+            document.getElementById('painelAdmin').style.display = 'block';
+            loadUsers();
+        } else {
+            const d = await res.json();
+            erro.textContent = d.error || 'Acesso negado.';
+            erro.style.display = 'block';
         }
+    }
 
-        async function loadUsers() {
-            const res = await fetch('/api/admin/users');
-            const users = await res.json();
-            const list = document.getElementById('user-list');
-            list.innerHTML = "";
-            users.forEach(u => {
-                list.innerHTML += `
-                    <tr>
-                        <td>${u.id}</td>
-                        <td>${u.username}</td>
-                        <td>${u.ativo ? "✅ Ativo" : "❌ Suspenso"}</td>
-                        <td>
-                            <button class="${u.ativo ? 'btn-off' : 'btn-on'}" onclick="toggleUser(${u.id}, ${u.ativo ? 0 : 1})">
-                                ${u.ativo ? "Desativar" : "Ativar"}
+    async function loadUsers() {
+        const res = await fetch('/api/admin/users');
+        if (!res.ok) return;
+        const users = await res.json();
+        const list = document.getElementById('userList');
+        list.innerHTML = '';
+        if (!users.length) {
+            list.innerHTML = '<tr><td colspan="5" style="text-align:center;color:#445;padding:20px">Nenhum cliente cadastrado.</td></tr>';
+            return;
+        }
+        users.forEach(u => {
+            list.innerHTML += `
+                <tr>
+                    <td style="color:#445">#${u.id}</td>
+                    <td><strong>${u.username}</strong></td>
+                    <td style="color:#aab">${u.horario_cobranca || '—'}</td>
+                    <td>${u.ativo ? '<span class="status-on">✅ Ativo</span>' : '<span class="status-off">❌ Suspenso</span>'}</td>
+                    <td>
+                        <div class="actions">
+                            <button class="btn btn-sm ${u.ativo ? 'btn-danger' : 'btn-success'}"
+                                onclick="toggleUser(${u.id}, ${u.ativo ? 0 : 1})">
+                                ${u.ativo ? 'Suspender' : 'Ativar'}
                             </button>
-                        </td>
-                    </tr>
-                `;
-            });
-        }
+                            <button class="btn btn-sm btn-danger" onclick="deleteUser(${u.id}, '${u.username}')">
+                                Excluir
+                            </button>
+                        </div>
+                    </td>
+                </tr>`;
+        });
+    }
 
-        async function addUser() {
-            const username = document.getElementById('new_user').value;
-            const password = document.getElementById('new_pass').value;
-            await fetch('/api/admin/users', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({username, password})
-            });
-            loadUsers();
+    async function addUser() {
+        const username = document.getElementById('new_user').value.trim();
+        const password = document.getElementById('new_pass').value;
+        const msg = document.getElementById('addMsg');
+        if (!username || !password) {
+            msg.style.color = '#e74c3c';
+            msg.textContent = 'Preencha todos os campos.';
+            msg.style.display = 'block';
+            return;
         }
+        const res = await fetch('/api/admin/users', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password })
+        });
+        const d = await res.json();
+        if (res.ok) {
+            msg.style.color = '#00c896';
+            msg.textContent = `✅ Cliente "${username}" cadastrado!`;
+            document.getElementById('new_user').value = '';
+            document.getElementById('new_pass').value = '';
+            loadUsers();
+        } else {
+            msg.style.color = '#e74c3c';
+            msg.textContent = d.error || 'Erro ao cadastrar.';
+        }
+        msg.style.display = 'block';
+        setTimeout(() => msg.style.display = 'none', 4000);
+    }
 
-        async function toggleUser(id, ativo) {
-            await fetch('/api/admin/users/toggle', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({id, ativo})
-            });
-            loadUsers();
-        }
-    </script>
+    async function toggleUser(id, ativo) {
+        await fetch('/api/admin/users/toggle', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id, ativo })
+        });
+        loadUsers();
+    }
+
+    async function deleteUser(id, username) {
+        if (!confirm(`Excluir o cliente "${username}"? Esta ação não pode ser desfeita.`)) return;
+        await fetch(`/api/admin/users/${id}`, { method: 'DELETE' });
+        loadUsers();
+    }
+
+    function sair() {
+        fetch('/api/logout', { method: 'POST' }).then(() => location.reload());
+    }
+</script>
 </body>
 </html>

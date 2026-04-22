@@ -3,47 +3,43 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CH Logic | Painel de Automação</title>
+    <title>CH Logic | Painel</title>
     <script src="/socket.io/socket.io.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-
-        body {
-            font-family: 'Segoe UI', sans-serif;
-            background: #0f1117;
-            color: #e0e0e0;
-            min-height: 100vh;
-        }
+        body { font-family: 'Segoe UI', sans-serif; background: #0f1117; color: #e0e0e0; min-height: 100vh; }
 
         header {
             background: #161b27;
-            padding: 16px 32px;
+            padding: 14px 32px;
             border-bottom: 1px solid #1e2535;
             display: flex;
             align-items: center;
-            gap: 12px;
+            justify-content: space-between;
         }
-
-        header h1 {
-            font-size: 1.2rem;
-            font-weight: 600;
-            color: #fff;
+        .header-left { display: flex; align-items: center; gap: 12px; }
+        header h1 { font-size: 1.1rem; font-weight: 700; color: #fff; }
+        .badge { background: #00c896; color: #000; font-size: 0.65rem; font-weight: 700; padding: 2px 8px; border-radius: 20px; }
+        .header-right { display: flex; align-items: center; gap: 16px; }
+        .user-info { font-size: 0.82rem; color: #556; }
+        .user-info strong { color: #00c896; }
+        .btn-logout {
+            background: transparent;
+            border: 1px solid #2a3347;
+            color: #778;
+            padding: 6px 14px;
+            border-radius: 6px;
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: all 0.2s;
         }
-
-        header span {
-            background: #00c896;
-            color: #000;
-            font-size: 0.7rem;
-            font-weight: 700;
-            padding: 2px 8px;
-            border-radius: 20px;
-        }
+        .btn-logout:hover { border-color: #e74c3c; color: #e74c3c; }
 
         .container {
             display: grid;
-            grid-template-columns: 380px 1fr;
-            gap: 24px;
-            padding: 24px 32px;
+            grid-template-columns: 360px 1fr;
+            gap: 20px;
+            padding: 20px 28px;
             max-width: 1300px;
             margin: 0 auto;
         }
@@ -52,179 +48,114 @@
             background: #161b27;
             border: 1px solid #1e2535;
             border-radius: 12px;
-            padding: 24px;
+            padding: 22px;
         }
-
         .card h2 {
-            font-size: 0.95rem;
-            font-weight: 600;
-            color: #aab;
+            font-size: 0.78rem;
+            font-weight: 700;
+            color: #556;
             text-transform: uppercase;
-            letter-spacing: 1px;
-            margin-bottom: 20px;
+            letter-spacing: 1.5px;
+            margin-bottom: 18px;
         }
 
-        .form-group {
-            margin-bottom: 16px;
-        }
-
-        .form-group label {
-            display: block;
-            font-size: 0.8rem;
-            color: #778;
-            margin-bottom: 6px;
-            font-weight: 500;
-        }
-
+        .form-group { margin-bottom: 14px; }
+        .form-group label { display: block; font-size: 0.78rem; color: #778; margin-bottom: 5px; }
         .form-group input {
             width: 100%;
             background: #0f1117;
             border: 1px solid #1e2535;
             border-radius: 8px;
-            padding: 10px 14px;
+            padding: 10px 12px;
             color: #fff;
-            font-size: 0.9rem;
-            transition: border 0.2s;
+            font-size: 0.88rem;
             outline: none;
+            transition: border 0.2s;
         }
-
-        .form-group input:focus {
-            border-color: #00c896;
-        }
-
-        .form-group input[type="time"] {
-            cursor: pointer;
-        }
+        .form-group input:focus { border-color: #00c896; }
 
         .btn {
             width: 100%;
-            padding: 12px;
+            padding: 11px;
             border: none;
             border-radius: 8px;
-            font-size: 0.9rem;
+            font-size: 0.88rem;
             font-weight: 600;
             cursor: pointer;
+            margin-bottom: 8px;
             transition: opacity 0.2s, transform 0.1s;
-            margin-bottom: 10px;
         }
-
         .btn:active { transform: scale(0.98); }
-        .btn:hover { opacity: 0.9; }
-
+        .btn:hover { opacity: 0.88; }
         .btn-primary { background: #00c896; color: #000; }
         .btn-secondary { background: #1e2a3a; color: #aab; }
-        .btn-danger { background: #e74c3c; color: #fff; }
         .btn-warning { background: #f39c12; color: #000; }
+
+        .divider { border: none; border-top: 1px solid #1e2535; margin: 18px 0; }
+        .section-label { font-size: 0.72rem; color: #445; text-transform: uppercase; letter-spacing: 1px; margin: 14px 0 8px; }
+
+        .info-box {
+            background: #0f1117;
+            border: 1px solid #1e2535;
+            border-radius: 8px;
+            padding: 10px 13px;
+            font-size: 0.8rem;
+            color: #667;
+            margin-top: 6px;
+        }
+        .info-box strong { color: #00c896; }
 
         .status-badge {
             display: inline-flex;
             align-items: center;
             gap: 6px;
-            padding: 6px 14px;
+            padding: 5px 12px;
             border-radius: 20px;
-            font-size: 0.8rem;
+            font-size: 0.78rem;
             font-weight: 600;
-            margin-top: 8px;
         }
-
         .status-badge.connected { background: #0d3327; color: #00c896; }
-        .status-badge.disconnected { background: #3a1a1a; color: #e74c3c; }
-
-        .dot {
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            background: currentColor;
-            animation: pulse 1.5s infinite;
-        }
-
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.3; }
-        }
-
-        .divider {
-            border: none;
-            border-top: 1px solid #1e2535;
-            margin: 20px 0;
-        }
-
-        .horario-info {
-            background: #0f1117;
-            border: 1px solid #1e2535;
-            border-radius: 8px;
-            padding: 12px 14px;
-            font-size: 0.82rem;
-            color: #778;
-            margin-top: 8px;
-        }
-
-        .horario-info strong {
-            color: #00c896;
-        }
+        .status-badge.disconnected { background: #2e1a1a; color: #e74c3c; }
+        .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; animation: pulse 1.5s infinite; }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
 
         /* LOG */
-        .log-card {
-            display: flex;
-            flex-direction: column;
-            height: calc(100vh - 120px);
-        }
-
-        .log-card h2 {
-            margin-bottom: 12px;
-        }
-
-        .log-toolbar {
-            display: flex;
-            gap: 8px;
-            margin-bottom: 12px;
-        }
-
+        .log-card { display: flex; flex-direction: column; height: calc(100vh - 108px); }
+        .log-toolbar { display: flex; gap: 8px; margin-bottom: 10px; }
         .log-toolbar button {
-            background: #1e2535;
-            border: none;
-            border-radius: 6px;
-            color: #aab;
-            padding: 6px 14px;
-            font-size: 0.8rem;
-            cursor: pointer;
-            transition: background 0.2s;
+            background: #1e2535; border: none; border-radius: 6px;
+            color: #aab; padding: 5px 12px; font-size: 0.78rem; cursor: pointer;
         }
-
         .log-toolbar button:hover { background: #2a3347; }
-
         #logBox {
             flex: 1;
             background: #0a0d14;
             border: 1px solid #1e2535;
             border-radius: 8px;
-            padding: 16px;
+            padding: 14px;
             overflow-y: auto;
             font-family: 'Courier New', monospace;
-            font-size: 0.82rem;
-            line-height: 1.7;
+            font-size: 0.8rem;
+            line-height: 1.75;
         }
-
         .log-line { color: #ccc; }
         .log-line.success { color: #00c896; }
         .log-line.error { color: #e74c3c; }
         .log-line.info { color: #3b9eff; }
         .log-line.warn { color: #f39c12; }
-
-        .section-title {
-            font-size: 0.75rem;
-            color: #556;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            margin: 16px 0 8px;
-        }
     </style>
 </head>
 <body>
 
 <header>
-    <h1>CH Logic | Painel</h1>
-    <span>SNIPER v4.0</span>
+    <div class="header-left">
+        <h1>CH Logic</h1>
+        <span class="badge">SNIPER v4.0</span>
+    </div>
+    <div class="header-right">
+        <div class="user-info">Logado como: <strong id="headerUsername">...</strong></div>
+        <button class="btn-logout" onclick="logout()">Sair</button>
+    </div>
 </header>
 
 <div class="container">
@@ -238,62 +169,43 @@
                 <label>URL do Painel Sigma</label>
                 <input type="text" id="painelUrl" placeholder="https://seupainelsigma.com" />
             </div>
-
-            <button class="btn btn-primary" onclick="salvarConfig()">
-                💾 Salvar e Abrir Sigma
-            </button>
+            <button class="btn btn-primary" onclick="salvarConfig()">💾 Salvar e Abrir Sigma</button>
 
             <hr class="divider">
 
-            <p class="section-title">⏰ Agendamento de Cobrança</p>
-
+            <p class="section-label">⏰ Agendamento Automático</p>
             <div class="form-group">
-                <label>Horário diário de varredura automática</label>
+                <label>Horário diário de cobrança</label>
                 <input type="time" id="horarioCobranca" value="08:00" />
             </div>
-
-            <button class="btn btn-primary" onclick="salvarHorario()">
-                ⏰ Salvar Horário
-            </button>
-
-            <div class="horario-info" id="horarioInfo">
-                Carregando horário...
-            </div>
+            <button class="btn btn-primary" onclick="salvarHorario()">⏰ Salvar Horário</button>
+            <div class="info-box" id="horarioInfo">Carregando...</div>
 
             <hr class="divider">
 
-            <button class="btn btn-warning" onclick="rodarAgora()">
-                ▶️ Rodar Varredura Agora
-            </button>
+            <button class="btn btn-warning" onclick="rodarAgora()">▶️ Rodar Varredura Agora</button>
 
             <hr class="divider">
 
-            <p class="section-title">📱 WhatsApp</p>
-
+            <p class="section-label">📱 WhatsApp</p>
             <div id="whatsappStatus">
-                <div class="status-badge disconnected">
-                    <div class="dot"></div> Desconectado
-                </div>
+                <span class="status-badge disconnected"><div class="dot"></div> Desconectado</span>
             </div>
-
-            <button class="btn btn-secondary" style="margin-top: 12px;" onclick="conectarWhatsApp()">
+            <button class="btn btn-secondary" style="margin-top:12px" onclick="conectarWhatsApp()">
                 📱 Conectar WhatsApp
             </button>
-
         </div>
     </div>
 
-    <!-- COLUNA DIREITA -->
+    <!-- LOG -->
     <div class="card log-card">
         <h2>📋 Logs do Sistema</h2>
-
         <div class="log-toolbar">
             <button onclick="limparLog()">🗑️ Limpar</button>
             <button onclick="exportarLog()">💾 Exportar</button>
         </div>
-
         <div id="logBox">
-            <div class="log-line info">&gt; Aguardando comandos...</div>
+            <div class="log-line info">> Aguardando comandos...</div>
         </div>
     </div>
 
@@ -301,91 +213,91 @@
 
 <script>
     const socket = io();
-    let userId = 1;
+    let userId = null;
 
-    // ── Conecta ao room do usuário
-    socket.on('connect', () => {
-        socket.emit('join_room', userId);
-        carregarConfig();
+    // ── Verifica sessão antes de qualquer coisa
+    (async () => {
+        try {
+            const r = await fetch('/api/me');
+            if (!r.ok) return window.location.href = '/login.html';
+            const user = await r.json();
+            userId = user.id;
+            document.getElementById('headerUsername').textContent = user.username;
+            if (user.painel_url) document.getElementById('painelUrl').value = user.painel_url;
+            if (user.horario_cobranca) {
+                document.getElementById('horarioCobranca').value = user.horario_cobranca;
+                atualizarInfoHorario(user.horario_cobranca);
+            }
+            // Conecta ao room correto após ter o userId
+            socket.emit('join_room', userId);
+        } catch(e) {
+            window.location.href = '/login.html';
+        }
+    })();
+
+    // ── Recebe logs do servidor (isolado por room)
+    socket.on('novo_log', (msg) => {
+        let cls = 'log-line';
+        if (msg.includes('✅') || msg.includes('🏆') || msg.includes('📦')) cls += ' success';
+        else if (msg.includes('❌')) cls += ' error';
+        else if (msg.includes('⏰') || msg.includes('📡') || msg.includes('▶️')) cls += ' info';
+        else if (msg.includes('⚠️')) cls += ' warn';
+        addLog(msg, cls);
     });
 
-    // ── Abre aba do Sigma quando servidor mandar
+    // ── Abre aba do Sigma
     socket.on('open_sigma_tab', (data) => {
-        addLog(`🕒 Abrindo painel Sigma...`, 'info');
-        addLog(`👉 Faça o login na nova aba para sincronizar automaticamente.`, 'warn');
+        addLog('🕒 Abrindo painel Sigma...', 'log-line info');
+        addLog('👉 Faça login e clique em Clientes para sincronizar.', 'log-line warn');
         window.open(data.url, '_blank');
     });
 
-    // ── Recebe logs do servidor
-    socket.on('novo_log', (msg) => {
-        let tipo = 'log-line';
-        if (msg.includes('✅') || msg.includes('🏆') || msg.includes('📦')) tipo += ' success';
-        else if (msg.includes('❌')) tipo += ' error';
-        else if (msg.includes('⏰') || msg.includes('📡') || msg.includes('▶️')) tipo += ' info';
-        else if (msg.includes('⚠️')) tipo += ' warn';
-        addLog(msg, '', tipo);
-    });
-
-    // ── Carrega configurações salvas
-    async function carregarConfig() {
-        try {
-            const r = await fetch('/api/config');
-            const d = await r.json();
-            if (d.painel_url) document.getElementById('painelUrl').value = d.painel_url;
-            if (d.horario_cobranca) {
-                document.getElementById('horarioCobranca').value = d.horario_cobranca;
-                atualizarInfoHorario(d.horario_cobranca);
-            }
-        } catch(e) {}
-    }
-
-    function atualizarInfoHorario(horario) {
+    function atualizarInfoHorario(h) {
         document.getElementById('horarioInfo').innerHTML =
-            `Varredura automática agendada para <strong>${horario}</strong> todos os dias.`;
+            `Varredura automática agendada para <strong>${h}</strong> todos os dias.`;
     }
 
-    // ── Salva URL do Sigma
     function salvarConfig() {
         const url = document.getElementById('painelUrl').value.trim();
         if (!url) return alert('Digite a URL do Sigma.');
-        addLog('💾 Salvando configurações...', 'info');
+        addLog('💾 Salvando configurações...', 'log-line info');
         socket.emit('save_config', { url });
     }
 
-    // ── Salva horário de cobrança
     async function salvarHorario() {
         const horario = document.getElementById('horarioCobranca').value;
         if (!horario) return alert('Selecione um horário.');
-
         const r = await fetch('/api/set-horario', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ userId, horario })
+            body: JSON.stringify({ horario })
         });
         const d = await r.json();
         if (d.success) atualizarInfoHorario(horario);
     }
 
-    // ── Força varredura imediata
     async function rodarAgora() {
-        addLog('▶️ Iniciando varredura manual...', 'info');
+        addLog('▶️ Iniciando varredura manual...', 'log-line info');
         await fetch('/api/rodar-agora', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ userId })
+            body: JSON.stringify({})
         });
     }
 
-    // ── WhatsApp (placeholder para próxima fase)
     function conectarWhatsApp() {
-        addLog('📱 Módulo WhatsApp em breve...', 'warn');
+        addLog('📱 Módulo WhatsApp em breve...', 'log-line warn');
     }
 
-    // ── Helpers de log
-    function addLog(msg, tipo = '', classe = '') {
+    async function logout() {
+        await fetch('/api/logout', { method: 'POST' });
+        window.location.href = '/login.html';
+    }
+
+    function addLog(msg, cls = 'log-line') {
         const box = document.getElementById('logBox');
         const div = document.createElement('div');
-        div.className = classe || `log-line ${tipo}`;
+        div.className = cls;
         div.textContent = '> ' + msg;
         box.appendChild(div);
         box.scrollTop = box.scrollHeight;
@@ -400,7 +312,7 @@
         const blob = new Blob([linhas], { type: 'text/plain' });
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
-        a.download = `ch-logic-log-${new Date().toISOString().slice(0,10)}.txt`;
+        a.download = `log-${new Date().toISOString().slice(0,10)}.txt`;
         a.click();
     }
 </script>
