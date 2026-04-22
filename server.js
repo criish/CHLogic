@@ -36,51 +36,49 @@ app.use(express.json());
 app.use(express.static('public'));
 
 // ==========================================
-// 🚀 MOTOR DE EXTRAÇÃO (VARREDURA)
+// 🚀 MOTOR DE EXTRAÇÃO (VERSÃO FINAL)
 // ==========================================
 async function dispararCobrancaSaaS(userId) {
     const user = await db.get('SELECT * FROM users WHERE id = ?', [userId]);
     const log = (msg) => io.to(`room_${userId}`).emit('novo_log', `[${new Date().toLocaleTimeString()}] ${msg}`);
 
-    if (!user) return;
-
-    log("🤖 Iniciando processamento interno...");
-
-    if (!user.cookie_sigma) {
-        return log("⏳ Aguardando sincronização de Cookie da extensão...");
-    }
-
-    if (!user.endpoint_clientes) {
-        return log("⏳ Rota de clientes não encontrada. Por favor, clique na aba 'Clientes' no Sigma.");
-    }
+    if (!user || !user.cookie_sigma || !user.endpoint_clientes) return;
 
     try {
-        log(`📂 Acessando banco de dados do Sigma via: ${user.endpoint_clientes}`);
+        log(`📡 Acessando API do Sigma...`);
         
-        const response = await axios.get(`${user.endpoint_clientes}?page=1&limit=300`, {
+        const domainBase = new URL(user.endpoint_clientes).origin;
+
+        const response = await axios.get(`${user.endpoint_clientes}?page=1&limit=500`, {
             headers: { 
                 'Cookie': user.cookie_sigma, 
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36' 
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+                'Referer': `${domainBase}/`,
+                'Origin': domainBase,
+                'Accept': 'application/json, text/plain, */*',
+                'X-Requested-With': 'XMLHttpRequest'
             },
             timeout: 20000
         });
 
-        let clientes = response.data.data || response.data.rows || response.data;
+        const data = response.data;
+        // O Sigma pode retornar a lista em .data ou .rows
+        let clientes = data.data || data.rows || (Array.isArray(data) ? data : null);
         
-        if (!Array.isArray(clientes)) {
-            return log("❌ Falha ao ler lista: Formato de dados desconhecido.");
+        if (!clientes || !Array.isArray(clientes)) {
+            return log("⚠️ Lista de clientes não encontrada na resposta do servidor.");
         }
 
-        log(`📊 Total de ${clientes.length} clientes importados. Filtrando régua...`);
+        log(`📊 Sucesso! ${clientes.length} clientes carregados. Analisando régua...`);
 
         const regua = [-7, -5, -3, -1, 0, 1, 3, 5, 7];
         const hoje = new Date(); hoje.setHours(0,0,0,0);
         let count = 0;
 
         clientes.forEach(c => {
-            const exp = c.expiration || c.expiry;
+            const exp = c.expiration || c.expiry || c.expiry_date;
             if (!exp) return;
-            
+
             const dtVenc = new Date(exp); dtVenc.setHours(0,0,0,0);
             const diffDays = Math.ceil((dtVenc - hoje) / (1000 * 60 * 60 * 24));
 
@@ -89,109 +87,87 @@ async function dispararCobrancaSaaS(userId) {
                 const zap = c.whatsapp?.replace(/\D/g, '') || c.phone?.replace(/\D/g, '');
                 
                 let status = diffDays === 0 ? "🔥 HOJE" : (diffDays < 0 ? "⚠️ ATRASADO" : "📅 A VENCER");
-                log(`📍 [DIA ${diffDays}] ${status} | ${nome} | WhatsApp: ${zap}`);
+                log(`📍 [DIA ${diffDays}] ${status} | ${nome} | Zap: ${zap}`);
                 count++;
             }
         });
 
-        log(`✅ Processo concluído! ${count} clientes prontos para cobrança.`);
+        log(`✅ Varredura finalizada. ${count} clientes identificados.`);
     } catch (e) { 
-        log(`❌ Erro na conexão com Sigma: ${e.message}`); 
+        if (e.response?.status === 401) {
+            log(`❌ Erro 401: Sessão expirada no Sigma. Por favor, clique em 'Sincronizar' no painel.`);
+        } else {
+            log(`❌ Erro na extração: ${e.message}`);
+        }
     }
-}
-
-// ==========================================
-// 📱 WHATSAPP (BAILEYS)
-// ==========================================
-async function startWhatsApp(userId) {
-    if (activeClients[userId]) return;
-
-    const { state, saveCreds } = await useMultiFileAuthState(`auth_info_${userId}`);
-    const { version } = await fetchLatestBaileysVersion();
-
-    const sock = makeWASocket({
-        version,
-        auth: state,
-        logger: pino({ level: 'silent' }),
-        browser: ["CH Logic", "Chrome", "1.0.0"]
-    });
-
-    sock.ev.on('creds.update', saveCreds);
-
-    sock.ev.on('connection.update', async (update) => {
-        const { connection, lastDisconnect, qr } = update;
-        
-        if (qr) {
-            qrcode.toDataURL(qr).then(url => io.to(`room_${userId}`).emit('qr_code', url));
-        }
-
-        if (connection === 'open') {
-            activeClients[userId] = sock;
-            console.log(`[ID ${userId}] WhatsApp Conectado!`);
-            io.to(`room_${userId}`).emit('status_update', { conectado: true });
-            
-            // AUTO-START: Se já tem dados, já varre assim que o Zap conecta
-            dispararCobrancaSaaS(userId);
-        }
-
-        if (connection === 'close') {
-            const reason = lastDisconnect?.error?.output?.statusCode;
-            delete activeClients[userId];
-            if (reason !== DisconnectReason.loggedOut) {
-                setTimeout(() => startWhatsApp(userId), 5000);
-            }
-        }
-    });
 }
 
 // ==========================================
 // 🔑 ROTAS DE SINCRONIZAÇÃO
 // ==========================================
 app.post('/api/sync-cookie', async (req, res) => {
-    const { userId, cookie } = req.body;
-    const id = userId || 1;
-    await db.run('UPDATE users SET cookie_sigma = ? WHERE id = ?', [cookie, id]);
-    console.log(`[ID ${id}] 🔑 Cookie Sincronizado!`);
-    dispararCobrancaSaaS(id); // Dispara ao receber novo cookie
+    await db.run('UPDATE users SET cookie_sigma = ? WHERE id = 1', [req.body.cookie]);
+    console.log(`[ID 1] 🔑 Cookie Atualizado!`);
+    dispararCobrancaSaaS(1);
     res.json({ success: true });
 });
 
 app.post('/api/sync-endpoint', async (req, res) => {
-    const { userId, fullUrl } = req.body;
-    const id = userId || 1;
-    if (fullUrl.includes('/api/customers')) {
-        const clean = fullUrl.split('?')[0];
-        await db.run('UPDATE users SET endpoint_clientes = ? WHERE id = ?', [clean, id]);
-        console.log(`[ID ${id}] 🎯 API DETECTADA: ${clean}`);
+    if (req.body.fullUrl.includes('/api/customers')) {
+        const clean = req.body.fullUrl.split('?')[0];
+        await db.run('UPDATE users SET endpoint_clientes = ? WHERE id = 1', [clean]);
+        io.to(`room_1`).emit('novo_log', `🎯 Rota detectada: ${clean}`);
     }
     res.json({ success: true });
 });
 
 // ==========================================
-// 🔑 LOGIN E CONFIG
+// 📱 WHATSAPP (MANTIDO)
+// ==========================================
+async function startWhatsApp(userId) {
+    if (activeClients[userId]) return;
+    const { state, saveCreds } = await useMultiFileAuthState(`auth_info_${userId}`);
+    const { version } = await fetchLatestBaileysVersion();
+    const sock = makeWASocket({
+        version,
+        auth: state,
+        logger: pino({ level: 'silent' }),
+        browser: ["CH Logic", "Chrome", "1.0.0"]
+    });
+    sock.ev.on('creds.update', saveCreds);
+    sock.ev.on('connection.update', (u) => {
+        if (u.qr) qrcode.toDataURL(u.qr).then(url => io.to(`room_${userId}`).emit('qr_code', url));
+        if (u.connection === 'open') {
+            activeClients[userId] = sock;
+            io.to(`room_${userId}`).emit('status_update', { conectado: true });
+            dispararCobrancaSaaS(userId);
+        }
+        if (u.connection === 'close') {
+            delete activeClients[userId];
+            const reason = u.lastDisconnect?.error?.output?.statusCode;
+            if (reason !== DisconnectReason.loggedOut) setTimeout(() => startWhatsApp(userId), 5000);
+        }
+    });
+}
+
+// ==========================================
+// 🔑 LOGIN E CONFIG (MANTIDOS)
 // ==========================================
 app.post('/api/login', async (req, res) => {
     const row = await db.get('SELECT * FROM users WHERE username = ? AND password = ?', [req.body.user, req.body.pass]);
     if (row) { req.session.userId = row.id; res.json({ success: true }); } else res.status(401).send();
 });
-
 app.get('/api/me', (req, res) => { if (req.session.userId) res.json({ id: req.session.userId }); else res.status(401).send(); });
-
 app.get('/api/config', async (req, res) => {
-    if (!req.session.userId) return res.status(401).send();
-    const config = await db.get('SELECT painel_url FROM users WHERE id = ?', [req.session.userId]);
-    res.json(config || {});
+    const c = await db.get('SELECT painel_url FROM users WHERE id = ?', [req.session.userId]);
+    res.json(c || {});
 });
-
-io.on('connection', (socket) => {
-    socket.on('join_room', (userId) => {
-        socket.join(`room_${userId}`);
-        startWhatsApp(userId);
-    });
-    socket.on('save_config', async (d) => {
+io.on('connection', (s) => {
+    s.on('join_room', (id) => { s.join(`room_${id}`); startWhatsApp(id); });
+    s.on('save_config', async (d) => {
         await db.run('UPDATE users SET painel_url = ? WHERE id = ?', [d.url, d.userId]);
-        socket.emit('open_sigma_tab', { url: d.url });
+        s.emit('open_sigma_tab', { url: d.url });
     });
 });
 
-server.listen(3000, () => console.log("🚀 Servidor Sniper Online na 3000"));
+server.listen(3000, () => console.log("🚀 Servidor Sniper Online!"));
