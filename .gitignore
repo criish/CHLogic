@@ -1,0 +1,20 @@
+# Dependências (muito pesado para subir)
+node_modules/
+
+# Banco de dados local (contém dados reais/testes)
+database.sqlite
+
+# Logs de erro e execução
+*.log
+cobranca.log
+
+# Pastas de autenticação (IMPORTANTE: evita expor sessões de WhatsApp/Bots)
+.wwebjs_auth/
+.wwebjs_cache/
+
+# Arquivos de ambiente/senhas
+.env
+
+# Arquivos do VS Code e Sistema
+.vscode/
+thumbs.db
