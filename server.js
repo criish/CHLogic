@@ -96,15 +96,14 @@ async function processarDadosSigma(userId) {
             log(`⚠️ Resposta recebida mas formato inesperado. Verifique o endpoint.`);
         }
     } catch (e) {
-        const status = e.response?.status;
-        if (status === 401) {
-            log(`❌ Erro 401: Cookie expirado. Reabra o Sigma para renovar.`);
-        } else if (status === 404) {
-            log(`❌ Erro 404: Endpoint não encontrado. Clique em 'Clientes' no Sigma novamente.`);
-        } else {
-            log(`❌ Erro: ${status || e.message}`);
-        }
-    }
+    const status = e.response?.status;
+    const body = JSON.stringify(e.response?.data || {});
+    const sentHeaders = JSON.stringify(e.config?.headers || {});
+
+    log(`❌ Erro ${status || e.message}`);
+    log(`📋 Resposta do servidor: ${body.substring(0, 300)}`);
+    log(`📤 Headers enviados: ${sentHeaders.substring(0, 300)}`);
+}
 }
 
 // CORREÇÃO 2: Proteção contra cookie vazio (evita sobrescrita acidental)
