@@ -40,7 +40,6 @@ app.use(express.static('public'));
 // ==========================================
 app.post('/api/sync-endpoint', async (req, res) => {
     const { userId, fullUrl } = req.body;
-    // Filtramos para pegar apenas a API de listagem real
     if (fullUrl.includes('/api/customers')) {
         const cleanEndpoint = fullUrl.split('?')[0];
         await db.run('UPDATE users SET endpoint_clientes = ? WHERE id = ?', [cleanEndpoint, userId || 1]);
@@ -51,23 +50,23 @@ app.post('/api/sync-endpoint', async (req, res) => {
 });
 
 // ==========================================
-// 🚀 MOTOR DE EXTRAÇÃO (RÉGUA DE COBRANÇA)
+// 🚀 MOTOR DE EXTRAÇÃO (VARREDURA)
 // ==========================================
 async function dispararCobrancaSaaS(userId) {
     const user = await db.get('SELECT * FROM users WHERE id = ?', [userId]);
     const sock = activeClients[userId];
     
-    // Se não tiver cookie ou endpoint, não tem como trabalhar
-    if (!user || !user.cookie_sigma || !user.endpoint_clientes) return;
-
     const log = (msg) => {
         const linha = `[${new Date().toLocaleTimeString()}] ${msg}`;
         io.to(`room_${userId}`).emit('novo_log', linha);
         console.log(`[ID ${userId}] ${linha}`);
     };
 
+    if (!user.cookie_sigma) return log("⚠️ Aguardando sincronização do Cookie...");
+    if (!user.endpoint_clientes) return log("⚠️ Aguardando detecção do Endpoint (clique em Clientes no Sigma)...");
+
     try {
-        log(`📡 Buscando dados em: ${user.endpoint_clientes}`);
+        log(`📡 Varrendo régua de cobrança em: ${user.endpoint_clientes}`);
         
         const response = await axios.get(`${user.endpoint_clientes}?page=1&limit=200`, {
             headers: { 
@@ -76,12 +75,9 @@ async function dispararCobrancaSaaS(userId) {
             }
         });
 
-        // O Sigma costuma retornar a lista em response.data.data ou response.data.rows
-        let clientes = response.data.data || response.data.rows || response.data;
+        const clientes = response.data.data || response.data.rows || response.data;
         
-        if (!Array.isArray(clientes)) {
-            return log("❌ Erro: A API respondeu, mas a lista de clientes não foi reconhecida.");
-        }
+        if (!Array.isArray(clientes)) return log("❌ Erro: Formato de lista não reconhecido.");
 
         const regua = [-7, -5, -3, -1, 0, 1, 3, 5, 7];
         const hoje = new Date();
@@ -89,14 +85,11 @@ async function dispararCobrancaSaaS(userId) {
 
         let count = 0;
         clientes.forEach(c => {
-            // Mapeia data de expiração (pode ser expiration ou expiry)
             const exp = c.expiration || c.expiry;
             if (!exp) return;
 
             const dtVenc = new Date(exp);
             dtVenc.setHours(0, 0, 0, 0);
-            
-            // Diferença em dias
             const diffDays = Math.ceil((dtVenc - hoje) / (1000 * 60 * 60 * 24));
 
             if (regua.includes(diffDays)) {
@@ -109,40 +102,49 @@ async function dispararCobrancaSaaS(userId) {
             }
         });
 
-        log(`✅ Varredura Finalizada. ${count} clientes encontrados na régua.`);
+        log(`✅ Varredura Finalizada. ${count} clientes na régua.`);
 
     } catch (e) {
         log(`❌ Erro na extração: ${e.message}`);
     }
 }
 
-// ==========================================
-// 🔑 ROTA DO COOKIE (MANTIDA)
-// ==========================================
 app.post('/api/sync-cookie', async (req, res) => {
     const { userId, cookie } = req.body;
     await db.run('UPDATE users SET cookie_sigma = ? WHERE id = ?', [cookie, userId || 1]);
     console.log(`[ID ${userId || 1}] 🔑 Cookie Sincronizado!`);
-    
-    // Agora que recebeu o cookie, tenta rodar a varredura
     dispararCobrancaSaaS(userId || 1);
     res.json({ success: true });
 });
 
 // ==========================================
-// 📱 WHATSAPP & INTERFACE (MANTIDOS)
+// 📱 WHATSAPP (CONEXÃO ESTÁVEL)
 // ==========================================
 async function startWhatsApp(userId) {
     if (activeClients[userId]) return;
+
     const { state, saveCreds } = await useMultiFileAuthState(`auth_info_${userId}`);
-    const sock = makeWASocket({ auth: state, logger: pino({ level: 'silent' }) });
+    const sock = makeWASocket({
+        auth: state,
+        logger: pino({ level: 'silent' }),
+        printQRInTerminal: false
+    });
+
     sock.ev.on('creds.update', saveCreds);
-    sock.ev.on('connection.update', (u) => {
-        if (u.qr) qrcode.toDataURL(u.qr).then(url => io.to(`room_${userId}`).emit('qr_code', url));
-        if (u.connection === 'open') {
+
+    sock.ev.on('connection.update', (update) => {
+        const { connection, qr } = update;
+        if (qr) {
+            qrcode.toDataURL(qr).then(url => io.to(`room_${userId}`).emit('qr_code', url));
+        }
+        if (connection === 'open') {
             activeClients[userId] = sock;
             io.to(`room_${userId}`).emit('status_update', { conectado: true });
             console.log(`[ID ${userId}] WhatsApp Conectado!`);
+        }
+        if (connection === 'close') {
+            delete activeClients[userId];
+            startWhatsApp(userId);
         }
     });
 }
