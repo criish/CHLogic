@@ -1,3 +1,4 @@
+const { conectarWhatsApp } = require('./whatsapp');
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -305,6 +306,17 @@ io.on('connection', (socket) => {
 
     socket.on('disconnect', () => {
         console.log(`🔌 Usuário ${userId} desconectado.`);
+    });
+    
+    // Iniciar conexão via QR Code
+    socket.on('request_qr', () => {
+        conectarWhatsApp(userId, io, emitLog);
+    });
+
+    // Iniciar conexão via Número de Telefone
+    socket.on('request_pairing', (data) => {
+        if (!data.phone) return socket.emit('error', 'Número necessário');
+        conectarWhatsApp(userId, io, emitLog, data.phone);
     });
 });
 

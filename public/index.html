@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>CH Logic | Painel</title>
+    <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.1/build/qrcode.min.js"></script>
     <script src="/socket.io/socket.io.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -147,6 +148,35 @@
 </head>
 <body>
 
+    <div class="modal fade" id="modalWhatsApp" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content text-dark">
+      <div class="modal-header">
+        <h5 class="modal-title">🔗 Conectar WhatsApp</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body text-center">
+        <div id="whatsapp-setup">
+            <p>Escolha o método de conexão:</p>
+            <div class="d-grid gap-2">
+                <button class="btn btn-primary" onclick="conectarQR()">📸 Gerar QR Code</button>
+                <div class="hr-text">ou</div>
+                <div class="input-group mb-3">
+                    <input type="text" id="phone-number" class="form-control" placeholder="55199...">
+                    <button class="btn btn-success" onclick="conectarNumero()">Receber Código</button>
+                </div>
+            </div>
+            
+            <div id="display-area" class="mt-3">
+                <canvas id="qr-canvas" style="display:none; margin: 0 auto; border: 1px solid #ccc;"></canvas>
+                <h2 id="pairing-display" style="color: #25D366; font-family: monospace; letter-spacing: 5px;"></h2>
+            </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
 <header>
     <div class="header-left">
         <h1>CH Logic</h1>
@@ -191,9 +221,9 @@
             <div id="whatsappStatus">
                 <span class="status-badge disconnected"><div class="dot"></div> Desconectado</span>
             </div>
-            <button class="btn btn-secondary" style="margin-top:12px" onclick="conectarWhatsApp()">
-                📱 Conectar WhatsApp
-            </button>
+            <button class="btn btn-secondary" style="margin-top:12px" data-bs-toggle="modal" data-bs-target="#modalWhatsApp">
+    📱 Conectar WhatsApp
+</button>
         </div>
     </div>
 
@@ -212,6 +242,41 @@
 </div>
 
 <script>
+    // Funções de gatilho para o Socket.io
+function conectarQR() {
+    limparDisplay();
+    document.getElementById('loading-spinner').style.display = "block";
+    socket.emit('request_qr'); // Envia solicitação ao server.js
+}
+
+function conectarNumero() {
+    const phone = document.getElementById('phone-number').value;
+    if (!phone) return alert("Digite o número com DDD (ex: 5519...)");
+    
+    limparDisplay();
+    document.getElementById('loading-spinner').style.display = "block";
+    socket.emit('request_pairing', { phone: phone });
+}
+
+function limparDisplay() {
+    document.getElementById('qr-canvas').style.display = "none";
+    document.getElementById('pairing-display').innerText = "";
+    document.getElementById('status-msg').innerText = "";
+}
+
+// Ouvintes do Socket
+socket.on('whatsapp_qr', (qrText) => {
+    document.getElementById('loading-spinner').style.display = "none";
+    const canvas = document.getElementById('qr-canvas');
+    canvas.style.display = "block";
+    QRCode.toCanvas(canvas, qrText, { width: 250 });
+});
+
+socket.on('pairing_code', (code) => {
+    document.getElementById('loading-spinner').style.display = "none";
+    document.getElementById('pairing-display').innerText = code;
+    document.getElementById('status-msg').innerText = "Digite este código no seu WhatsApp em 'Aparelhos Conectados > Conectar com número de telefone'";
+});
     const socket = io();
     let userId = null;
 
