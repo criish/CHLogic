@@ -147,36 +147,30 @@
     </style>
 </head>
 <body>
-
     <div class="modal fade" id="modalWhatsApp" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-dialog-centered">
-    <div class="modal-content text-dark">
-      <div class="modal-header">
-        <h5 class="modal-title">🔗 Conectar WhatsApp</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-      </div>
-      <div class="modal-body text-center">
-        <div id="whatsapp-setup">
-            <p>Escolha o método de conexão:</p>
-            <div class="d-grid gap-2">
-                <button class="btn btn-primary" onclick="conectarQR()">📸 Gerar QR Code</button>
-                <div class="hr-text">ou</div>
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0 shadow">
+            <div class="modal-header bg-primary text-white">
+                <h5 class="modal-title">Conectar WhatsApp</h5>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body p-4 text-center">
+                <div class="d-grid gap-2 mb-3">
+                    <button class="btn btn-outline-primary" onclick="socket.emit('request_qr')">📸 Usar QR Code</button>
+                </div>
                 <div class="input-group mb-3">
-                    <input type="text" id="phone-number" class="form-control" placeholder="55199...">
+                    <input type="text" id="phone-number" class="form-control" placeholder="5519999999999">
                     <button class="btn btn-success" onclick="conectarNumero()">Receber Código</button>
                 </div>
-            </div>
-            
-            <div id="display-area" class="mt-3">
-                <canvas id="qr-canvas" style="display:none; margin: 0 auto; border: 1px solid #ccc;"></canvas>
-                <h2 id="pairing-display" style="color: #25D366; font-family: monospace; letter-spacing: 5px;"></h2>
+                
+                <div id="wa-display" class="mt-3 p-3 border rounded bg-light" style="min-height: 200px; display: flex; align-items: center; justify-content: center;">
+                    <canvas id="qr-canvas" style="display:none;"></canvas>
+                    <h1 id="pairing-display" style="letter-spacing: 5px; color: #25D366; font-weight: bold;"></h1>
+                </div>
             </div>
         </div>
-      </div>
     </div>
-  </div>
 </div>
-
 <header>
     <div class="header-left">
         <h1>CH Logic</h1>
@@ -221,8 +215,8 @@
             <div id="whatsappStatus">
                 <span class="status-badge disconnected"><div class="dot"></div> Desconectado</span>
             </div>
-            <button class="btn btn-secondary" style="margin-top:12px" data-bs-toggle="modal" data-bs-target="#modalWhatsApp">
-    📱 Conectar WhatsApp
+            <button class="btn btn-primary w-100 mt-2" data-bs-toggle="modal" data-bs-target="#modalWhatsApp">
+    <i class="fab fa-whatsapp"></i> Conectar WhatsApp
 </button>
         </div>
     </div>
@@ -241,145 +235,32 @@
 
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.1/build/qrcode.min.js"></script>
 <script>
-    // Funções de gatilho para o Socket.io
-function conectarQR() {
-    limparDisplay();
-    document.getElementById('loading-spinner').style.display = "block";
-    socket.emit('request_qr'); // Envia solicitação ao server.js
-}
+    function conectarNumero() {
+        const phone = document.getElementById('phone-number').value;
+        if(!phone) return alert("Digite o número!");
+        socket.emit('request_pairing', { phone: phone });
+        document.getElementById('pairing-display').innerText = "Gerando...";
+    }
 
-function conectarNumero() {
-    const phone = document.getElementById('phone-number').value;
-    if (!phone) return alert("Digite o número com DDD (ex: 5519...)");
-    
-    limparDisplay();
-    document.getElementById('loading-spinner').style.display = "block";
-    socket.emit('request_pairing', { phone: phone });
-}
+    socket.on('whatsapp_qr', (qr) => {
+        const canvas = document.getElementById('qr-canvas');
+        canvas.style.display = "block";
+        document.getElementById('pairing-display').innerText = "";
+        QRCode.toCanvas(canvas, qr, { width: 200 });
+    });
 
-function limparDisplay() {
-    document.getElementById('qr-canvas').style.display = "none";
-    document.getElementById('pairing-display').innerText = "";
-    document.getElementById('status-msg').innerText = "";
-}
+    socket.on('pairing_code', (code) => {
+        document.getElementById('qr-canvas').style.display = "none";
+        document.getElementById('pairing-display').innerText = code;
+    });
 
-// Ouvintes do Socket
-socket.on('whatsapp_qr', (qrText) => {
-    document.getElementById('loading-spinner').style.display = "none";
-    const canvas = document.getElementById('qr-canvas');
-    canvas.style.display = "block";
-    QRCode.toCanvas(canvas, qrText, { width: 250 });
-});
-
-socket.on('pairing_code', (code) => {
-    document.getElementById('loading-spinner').style.display = "none";
-    document.getElementById('pairing-display').innerText = code;
-    document.getElementById('status-msg').innerText = "Digite este código no seu WhatsApp em 'Aparelhos Conectados > Conectar com número de telefone'";
-});
-    const socket = io();
-    let userId = null;
-
-    // ── Verifica sessão antes de qualquer coisa
-    (async () => {
-        try {
-            const r = await fetch('/api/me');
-            if (!r.ok) return window.location.href = '/login.html';
-            const user = await r.json();
-            userId = user.id;
-            document.getElementById('headerUsername').textContent = user.username;
-            if (user.painel_url) document.getElementById('painelUrl').value = user.painel_url;
-            if (user.horario_cobranca) {
-                document.getElementById('horarioCobranca').value = user.horario_cobranca;
-                atualizarInfoHorario(user.horario_cobranca);
-            }
-            // Conecta ao room correto após ter o userId
-            socket.emit('join_room', userId);
-        } catch(e) {
-            window.location.href = '/login.html';
+    socket.on('whatsapp_status', (status) => {
+        if(status.connected) {
+            document.getElementById('wa-display').innerHTML = "<h4 class='text-success'>✅ Conectado!</h4>";
         }
-    })();
-
-    // ── Recebe logs do servidor (isolado por room)
-    socket.on('novo_log', (msg) => {
-        let cls = 'log-line';
-        if (msg.includes('✅') || msg.includes('🏆') || msg.includes('📦')) cls += ' success';
-        else if (msg.includes('❌')) cls += ' error';
-        else if (msg.includes('⏰') || msg.includes('📡') || msg.includes('▶️')) cls += ' info';
-        else if (msg.includes('⚠️')) cls += ' warn';
-        addLog(msg, cls);
     });
-
-    // ── Abre aba do Sigma
-    socket.on('open_sigma_tab', (data) => {
-        addLog('🕒 Abrindo painel Sigma...', 'log-line info');
-        addLog('👉 Faça login e clique em Clientes para sincronizar.', 'log-line warn');
-        window.open(data.url, '_blank');
-    });
-
-    function atualizarInfoHorario(h) {
-        document.getElementById('horarioInfo').innerHTML =
-            `Varredura automática agendada para <strong>${h}</strong> todos os dias.`;
-    }
-
-    function salvarConfig() {
-        const url = document.getElementById('painelUrl').value.trim();
-        if (!url) return alert('Digite a URL do Sigma.');
-        addLog('💾 Salvando configurações...', 'log-line info');
-        socket.emit('save_config', { url });
-    }
-
-    async function salvarHorario() {
-        const horario = document.getElementById('horarioCobranca').value;
-        if (!horario) return alert('Selecione um horário.');
-        const r = await fetch('/api/set-horario', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ horario })
-        });
-        const d = await r.json();
-        if (d.success) atualizarInfoHorario(horario);
-    }
-
-    async function rodarAgora() {
-        addLog('▶️ Iniciando varredura manual...', 'log-line info');
-        await fetch('/api/rodar-agora', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({})
-        });
-    }
-
-    function conectarWhatsApp() {
-        addLog('📱 Módulo WhatsApp em breve...', 'log-line warn');
-    }
-
-    async function logout() {
-        await fetch('/api/logout', { method: 'POST' });
-        window.location.href = '/login.html';
-    }
-
-    function addLog(msg, cls = 'log-line') {
-        const box = document.getElementById('logBox');
-        const div = document.createElement('div');
-        div.className = cls;
-        div.textContent = '> ' + msg;
-        box.appendChild(div);
-        box.scrollTop = box.scrollHeight;
-    }
-
-    function limparLog() {
-        document.getElementById('logBox').innerHTML = '<div class="log-line info">> Log limpo.</div>';
-    }
-
-    function exportarLog() {
-        const linhas = [...document.querySelectorAll('#logBox div')].map(d => d.textContent).join('\n');
-        const blob = new Blob([linhas], { type: 'text/plain' });
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = `log-${new Date().toISOString().slice(0,10)}.txt`;
-        a.click();
-    }
 </script>
 </body>
 </html>

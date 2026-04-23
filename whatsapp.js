@@ -1,9 +1,4 @@
-const { 
-    default: makeWASocket, 
-    useMultiFileAuthState, 
-    DisconnectReason, 
-    delay 
-} = require('@whiskeysockets/baileys');
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, delay } = require('@whiskeysockets/baileys');
 const { Boom } = require('@hapi/boom');
 const pino = require('pino');
 
@@ -26,21 +21,15 @@ async function conectarWhatsApp(userId, io, emitLog, phoneNumber = null) {
     sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect, qr } = update;
 
-        // Gerenciamento de QR Code
         if (qr && !phoneNumber) {
             io.to(`room_${userId}`).emit('whatsapp_qr', qr);
-            emitLog(userId, "📸 QR Code gerado. Escaneie para conectar.");
+            emitLog(userId, "📸 QR Code gerado.");
         }
 
         if (connection === 'close') {
             const shouldReconnect = (lastDisconnect.error instanceof Boom)?.output?.statusCode !== DisconnectReason.loggedOut;
-            if (shouldReconnect) {
-                delete sessions[userId];
-                conectarWhatsApp(userId, io, emitLog, phoneNumber);
-            } else {
-                emitLog(userId, "❌ Sessão encerrada. Conecte novamente.");
-                delete sessions[userId];
-            }
+            delete sessions[userId];
+            if (shouldReconnect) conectarWhatsApp(userId, io, emitLog, phoneNumber);
         } else if (connection === 'open') {
             emitLog(userId, "✅ WhatsApp Conectado!");
             io.to(`room_${userId}`).emit('whatsapp_status', { connected: true });
@@ -48,18 +37,15 @@ async function conectarWhatsApp(userId, io, emitLog, phoneNumber = null) {
         }
     });
 
-    // Lógica para Conexão via Número (Pairing Code)
     if (phoneNumber && !sock.authState.creds.registered) {
-        await delay(3000); // Espera inicialização
+        await delay(5000);
         try {
             const code = await sock.requestPairingCode(phoneNumber.replace(/\D/g, ''));
             io.to(`room_${userId}`).emit('pairing_code', code);
-            emitLog(userId, `🔑 Código de pareamento gerado: ${code}`);
         } catch (err) {
-            emitLog(userId, "❌ Erro ao solicitar código de pareamento.");
+            emitLog(userId, "❌ Erro ao gerar código de pareamento.");
         }
     }
-
     return sock;
 }
 
