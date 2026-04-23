@@ -1,4 +1,3 @@
-const { conectarWhatsApp } = require('./whatsapp');
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
@@ -7,6 +6,7 @@ const sqlite3 = require('sqlite3');
 const { open } = require('sqlite');
 const cors = require('cors');
 const crypto = require('crypto');
+const { conectarWhatsApp, desconectarWhatsApp, isConectado, enviarMensagem } = require('./whatsapp');
 
 const app = express();
 const server = http.createServer(app);
@@ -21,20 +21,15 @@ const sessionMiddleware = session({
     secret: 'CH_SNIPER_2026',
     resave: false,
     saveUninitialized: false,
-    cookie: { maxAge: 1000 * 60 * 60 * 24 } // 24h
+    cookie: { maxAge: 1000 * 60 * 60 * 24 }
 });
 
 app.use(sessionMiddleware);
-
-// Compartilha sessão com socket.io
-io.use((socket, next) => {
-    sessionMiddleware(socket.request, {}, next);
-});
+io.use((socket, next) => sessionMiddleware(socket.request, {}, next));
 
 let db;
 (async () => {
     db = await open({ filename: './database.sqlite', driver: sqlite3.Database });
-
     await db.exec(`
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -45,7 +40,6 @@ let db;
             ativo INTEGER DEFAULT 1,
             is_admin INTEGER DEFAULT 0
         );
-
         CREATE TABLE IF NOT EXISTS clientes_cache (
             user_id INTEGER PRIMARY KEY,
             clientes TEXT,
@@ -53,11 +47,12 @@ let db;
         );
     `);
 
-    // Cria admin padrão se não existir
-    const admin = await db.get(`SELECT id FROM users WHERE is_admin = 1`);
+    const admin = await db.get('SELECT id FROM users WHERE is_admin = 1');
     if (!admin) {
-        const hash = hashSenha('admin123');
-        await db.run(`INSERT INTO users (username, password, ativo, is_admin) VALUES ('admin', ?, 1, 1)`, [hash]);
+        await db.run(
+            `INSERT INTO users (username, password, ativo, is_admin) VALUES ('admin', ?, 1, 1)`,
+            [hashSenha('admin123')]
+        );
         console.log("👑 Admin criado: admin / admin123");
     }
 
@@ -86,7 +81,7 @@ function requireAdmin(req, res, next) {
 }
 
 // ─────────────────────────────────────────────
-// Processa a régua de cobrança
+// Régua de cobrança
 // ─────────────────────────────────────────────
 function processarRegua(userId, clientes) {
     const regua = [-7, -5, -3, -1, 0, 1, 3, 5, 7];
@@ -116,31 +111,52 @@ function processarRegua(userId, clientes) {
 }
 
 // ─────────────────────────────────────────────
-// Scheduler: roda a cada minuto para todos os usuários
+// Scheduler automático
 // ─────────────────────────────────────────────
 function iniciarScheduler() {
     console.log("⏰ Scheduler iniciado.");
     setInterval(async () => {
         const agora = new Date();
         const horaAtual = `${String(agora.getHours()).padStart(2, '0')}:${String(agora.getMinutes()).padStart(2, '0')}`;
-
         const usuarios = await db.all('SELECT * FROM users WHERE ativo = 1 AND is_admin = 0');
+
         for (const user of usuarios) {
             if (user.horario_cobranca === horaAtual) {
-                console.log(`⏰ Rodando scheduler para usuário ${user.id} (${user.username})`);
                 emitLog(user.id, `⏰ Horário agendado! Iniciando varredura automática...`);
-
                 const cache = await db.get('SELECT * FROM clientes_cache WHERE user_id = ?', [user.id]);
-                if (cache && cache.clientes) {
+                if (cache?.clientes) {
                     const clientes = JSON.parse(cache.clientes);
                     emitLog(user.id, `📦 ${clientes.length} clientes no cache. Processando...`);
-                    processarRegua(user.id, clientes);
+                    const naRegua = processarRegua(user.id, clientes);
+
+                    // Envia WhatsApp se estiver conectado
+                    if (isConectado(user.id) && naRegua.length > 0) {
+                        emitLog(user.id, `📱 Iniciando envio de mensagens...`);
+                        for (const cliente of naRegua) {
+                            if (cliente.zap && cliente.zap !== 'N/A') {
+                                const msg = gerarMensagem(cliente.nome, cliente.diffDays);
+                                await enviarMensagem(user.id, cliente.zap, msg, emitLog);
+                                await new Promise(r => setTimeout(r, 2000)); // delay entre mensagens
+                            }
+                        }
+                    }
                 } else {
-                    emitLog(user.id, `⚠️ Sem cache. Acesse o Sigma e clique em 'Clientes' para sincronizar.`);
+                    emitLog(user.id, `⚠️ Sem cache. Acesse o Sigma e clique em 'Clientes'.`);
                 }
             }
         }
     }, 60 * 1000);
+}
+
+// Gera mensagem personalizada por dia da régua
+function gerarMensagem(nome, diffDays) {
+    if (diffDays < 0) {
+        return `Olá ${nome}! 👋\n\nSeu plano IPTV venceu há ${Math.abs(diffDays)} dia(s). Renove agora para não ficar sem acesso!\n\nQualquer dúvida, estamos à disposição. 😊`;
+    } else if (diffDays === 0) {
+        return `Olá ${nome}! ⚠️\n\nSeu plano IPTV vence *hoje*! Renove agora para não perder o acesso.\n\nEstamos à disposição! 😊`;
+    } else {
+        return `Olá ${nome}! 📅\n\nSeu plano IPTV vence em *${diffDays} dia(s)*. Renove com antecedência para não ter interrupção!\n\nQualquer dúvida, fale conosco. 😊`;
+    }
 }
 
 // ─────────────────────────────────────────────
@@ -148,16 +164,11 @@ function iniciarScheduler() {
 // ─────────────────────────────────────────────
 app.post('/api/login', async (req, res) => {
     const { user, pass } = req.body;
-    if (!user || !pass) return res.status(400).json({ error: 'Dados incompletos' });
-
     const found = await db.get('SELECT * FROM users WHERE username = ?', [user]);
-    if (!found || found.password !== hashSenha(pass)) {
+    if (!found || found.password !== hashSenha(pass))
         return res.status(401).json({ error: 'Usuário ou senha inválidos' });
-    }
-    if (!found.ativo) {
+    if (!found.ativo)
         return res.status(403).json({ error: 'Conta suspensa. Contate o suporte.' });
-    }
-
     req.session.userId = found.id;
     req.session.isAdmin = found.is_admin === 1;
     res.json({ success: true, isAdmin: found.is_admin === 1 });
@@ -169,12 +180,15 @@ app.post('/api/logout', (req, res) => {
 });
 
 app.get('/api/me', requireAuth, async (req, res) => {
-    const user = await db.get('SELECT id, username, painel_url, horario_cobranca, is_admin FROM users WHERE id = ?', [req.session.userId]);
+    const user = await db.get(
+        'SELECT id, username, painel_url, horario_cobranca, is_admin FROM users WHERE id = ?',
+        [req.session.userId]
+    );
     res.json(user);
 });
 
 // ─────────────────────────────────────────────
-// CONFIG ROUTES (cliente logado)
+// CONFIG ROUTES
 // ─────────────────────────────────────────────
 app.get('/api/config', requireAuth, async (req, res) => {
     const user = await db.get('SELECT painel_url, horario_cobranca FROM users WHERE id = ?', [req.session.userId]);
@@ -183,12 +197,47 @@ app.get('/api/config', requireAuth, async (req, res) => {
 
 app.post('/api/set-horario', requireAuth, async (req, res) => {
     const { horario } = req.body;
-    if (!horario || !/^\d{2}:\d{2}$/.test(horario)) {
+    if (!horario || !/^\d{2}:\d{2}$/.test(horario))
         return res.status(400).json({ error: 'Formato inválido. Use HH:MM' });
-    }
     await db.run('UPDATE users SET horario_cobranca = ? WHERE id = ?', [horario, req.session.userId]);
-    emitLog(req.session.userId, `⏰ Horário de cobrança definido para ${horario} todos os dias.`);
+    emitLog(req.session.userId, `⏰ Horário de cobrança definido para ${horario}.`);
     res.json({ success: true, horario });
+});
+
+app.post('/api/rodar-agora', requireAuth, async (req, res) => {
+    const userId = req.session.userId;
+    const cache = await db.get('SELECT * FROM clientes_cache WHERE user_id = ?', [userId]);
+    if (cache?.clientes) {
+        const clientes = JSON.parse(cache.clientes);
+        emitLog(userId, `▶️ Varredura manual iniciada. ${clientes.length} clientes no cache.`);
+        processarRegua(userId, clientes);
+        res.json({ success: true });
+    } else {
+        emitLog(userId, `⚠️ Sem cache. Abra o Sigma e clique em 'Clientes' primeiro.`);
+        res.json({ success: false });
+    }
+});
+
+// ─────────────────────────────────────────────
+// WHATSAPP ROUTES
+// ─────────────────────────────────────────────
+app.post('/api/whatsapp/conectar', requireAuth, async (req, res) => {
+    const userId = req.session.userId;
+    const { phone } = req.body; // opcional — se vier, usa código de pareamento
+    emitLog(userId, `📱 Iniciando conexão WhatsApp...`);
+    await conectarWhatsApp(userId, io, emitLog, phone || null);
+    res.json({ success: true });
+});
+
+app.post('/api/whatsapp/desconectar', requireAuth, async (req, res) => {
+    const userId = req.session.userId;
+    await desconectarWhatsApp(userId, emitLog);
+    io.to(`room_${userId}`).emit('whatsapp_status', { connected: false });
+    res.json({ success: true });
+});
+
+app.get('/api/whatsapp/status', requireAuth, (req, res) => {
+    res.json({ connected: isConectado(req.session.userId) });
 });
 
 // ─────────────────────────────────────────────
@@ -196,11 +245,9 @@ app.post('/api/set-horario', requireAuth, async (req, res) => {
 // ─────────────────────────────────────────────
 app.post('/api/sync-clientes', async (req, res) => {
     const { userId, clientes } = req.body;
-    if (!userId || !clientes || !Array.isArray(clientes)) {
+    if (!userId || !clientes || !Array.isArray(clientes))
         return res.status(400).json({ error: 'Dados inválidos' });
-    }
 
-    // Valida que o userId existe e está ativo
     const user = await db.get('SELECT id FROM users WHERE id = ? AND ativo = 1', [userId]);
     if (!user) return res.status(403).json({ error: 'Usuário inválido' });
 
@@ -221,45 +268,27 @@ app.post('/api/sync-log', async (req, res) => {
     res.json({ success: true });
 });
 
-// Rodar varredura manualmente
-app.post('/api/rodar-agora', requireAuth, async (req, res) => {
-    const userId = req.session.userId;
-    const cache = await db.get('SELECT * FROM clientes_cache WHERE user_id = ?', [userId]);
-
-    if (cache && cache.clientes) {
-        const clientes = JSON.parse(cache.clientes);
-        emitLog(userId, `▶️ Varredura manual iniciada. ${clientes.length} clientes no cache.`);
-        processarRegua(userId, clientes);
-        res.json({ success: true });
-    } else {
-        emitLog(userId, `⚠️ Sem cache. Abra o Sigma e clique em 'Clientes' primeiro.`);
-        res.json({ success: false, reason: 'Sem cache' });
-    }
-});
-
 // ─────────────────────────────────────────────
 // ADMIN ROUTES
 // ─────────────────────────────────────────────
 app.post('/api/admin/login', async (req, res) => {
     const { user, pass } = req.body;
     const found = await db.get('SELECT * FROM users WHERE username = ? AND is_admin = 1', [user]);
-    if (!found || found.password !== hashSenha(pass)) {
+    if (!found || found.password !== hashSenha(pass))
         return res.status(401).json({ error: 'Acesso negado' });
-    }
     req.session.userId = found.id;
     req.session.isAdmin = true;
     res.json({ success: true });
 });
 
 app.get('/api/admin/users', requireAdmin, async (req, res) => {
-    const users = await db.all('SELECT id, username, ativo, horario_cobranca, painel_url FROM users WHERE is_admin = 0');
+    const users = await db.all('SELECT id, username, ativo, horario_cobranca FROM users WHERE is_admin = 0');
     res.json(users);
 });
 
 app.post('/api/admin/users', requireAdmin, async (req, res) => {
     const { username, password } = req.body;
     if (!username || !password) return res.status(400).json({ error: 'Dados incompletos' });
-
     try {
         await db.run(
             'INSERT INTO users (username, password, ativo, is_admin) VALUES (?, ?, 1, 0)',
@@ -284,14 +313,16 @@ app.delete('/api/admin/users/:id', requireAdmin, async (req, res) => {
 });
 
 // ─────────────────────────────────────────────
-// SOCKET.IO — isolado por usuário via sessão
+// SOCKET.IO
 // ─────────────────────────────────────────────
 io.on('connection', (socket) => {
     const userId = socket.request.session?.userId;
     if (!userId) return;
 
     socket.join(`room_${userId}`);
-    console.log(`🔌 Usuário ${userId} conectado ao socket.`);
+
+    // Envia status atual do WhatsApp ao conectar
+    socket.emit('whatsapp_status', { connected: isConectado(userId) });
 
     socket.on('save_config', async (d) => {
         await db.run('UPDATE users SET painel_url = ? WHERE id = ?', [d.url, userId]);
@@ -302,21 +333,6 @@ io.on('connection', (socket) => {
         if (!/^\d{2}:\d{2}$/.test(d.horario)) return;
         await db.run('UPDATE users SET horario_cobranca = ? WHERE id = ?', [d.horario, userId]);
         emitLog(userId, `⏰ Horário definido: ${d.horario} todos os dias.`);
-    });
-
-    socket.on('disconnect', () => {
-        console.log(`🔌 Usuário ${userId} desconectado.`);
-    });
-    
-    // Iniciar conexão via QR Code
-    socket.on('request_qr', () => {
-        conectarWhatsApp(userId, io, emitLog);
-    });
-
-    // Iniciar conexão via Número de Telefone
-    socket.on('request_pairing', (data) => {
-        if (!data.phone) return socket.emit('error', 'Número necessário');
-        conectarWhatsApp(userId, io, emitLog, data.phone);
     });
 });
 
