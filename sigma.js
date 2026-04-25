@@ -2,18 +2,18 @@ const { fetch, Agent } = require('undici');
 const { HttpsProxyAgent } = require('https-proxy-agent');
 const { getDb } = require('./database');
 
-/**
- * CONFIGURAÇÃO DO TÚNEL (REMOTE PORT FORWARDING)
- * O tráfego entra no localhost:8888 da Oracle, viaja pelo Termius,
- * e sai pelo Gost (porta 1080) no seu Windows em Rio Claro.
- */
+// 1. CONFIGURAÇÃO DO TÚNEL (PORTA 8888)
 const proxyAgent = new HttpsProxyAgent('http://127.0.0.1:8888');
 
+// Aumentamos o timeout para 60s para suportar a latência do túnel SSH
 const dispatcher = new Agent({
   connect: {
     agent: proxyAgent,
-    rejectUnauthorized: false // Evita falhas de SSL durante o tunelamento
-  }
+    rejectUnauthorized: false,
+    timeout: 60000 
+  },
+  bodyTimeout: 60000,
+  headersTimeout: 60000
 });
 
 function log(emitLog, userId, msg) {
@@ -22,7 +22,7 @@ function log(emitLog, userId, msg) {
 }
 
 /**
- * Autenticação via Túnel Termius (Porta 8888)
+ * Autenticação via Túnel Termius + Gost
  */
 async function capturarToken(userId, emitLog) {
   const db = await getDb();
@@ -33,22 +33,22 @@ async function capturarToken(userId, emitLog) {
     return null;
   }
 
+  // Limpa a URL de qualquer barra ou caractere extra
   const baseUrl = user.sigma_url.replace(/\/$/, '').split('#')[0];
   
-  // Lista de rotas para descoberta automática de API
   const rotas = [
     `${baseUrl}/api/login`,
     `${baseUrl}/api/v1/login`,
     `${baseUrl}/api/auth/login`
   ];
 
-  log(emitLog, userId, '🔐 Iniciando autenticação via Túnel (Porta 8888)...');
+  log(emitLog, userId, '🔐 Autenticando via Túnel (Porta 8888)...');
 
   for (const rota of rotas) {
     try {
       const response = await fetch(rota, {
         method: 'POST',
-        dispatcher, // Usa o túnel do seu PC
+        dispatcher,
         headers: {
           'Content-Type': 'application/json',
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124.0.0.0'
@@ -64,7 +64,7 @@ async function capturarToken(userId, emitLog) {
         const token = data?.token || data?.access_token || data?.data?.token;
 
         if (token) {
-          log(emitLog, userId, `✅ Sucesso via: ${rota}`);
+          log(emitLog, userId, `✅ Autenticado com sucesso!`);
           await db.run(
             'UPDATE users SET sigma_token = ?, sigma_updated_at = ? WHERE id = ?',
             [token, new Date().toISOString(), userId]
@@ -73,12 +73,12 @@ async function capturarToken(userId, emitLog) {
         }
       }
     } catch (e) {
-      // Tenta a próxima rota silenciosamente
+      log(emitLog, userId, `⚠️ Tentando próxima rota devido a lentidão...`);
       continue;
     }
   }
 
-  log(emitLog, userId, '❌ Falha: O Sigma não respondeu. Verifique se o Termius e o Gost estão ativos.');
+  log(emitLog, userId, '❌ Falha: O Sigma não respondeu a tempo. Verifique o Gost/Termius.');
   return null;
 }
 
@@ -97,12 +97,12 @@ async function buscarClientes(userId, emitLog) {
 
   const rotaApi = user.sigma_url_api || `${user.sigma_url.split('#')[0]}/api/customers`;
 
-  log(emitLog, userId, `📡 Sincronizando clientes via IP Residencial...`);
+  log(emitLog, userId, `📡 Sincronizando clientes via Túnel...`);
 
   try {
     const response = await fetch(rotaApi, {
       method: 'GET',
-      dispatcher, // Passa pelo túnel
+      dispatcher,
       headers: {
         'Authorization': `Bearer ${user.sigma_token}`,
         'Accept': 'application/json',
@@ -122,11 +122,10 @@ async function buscarClientes(userId, emitLog) {
 
     const clientes = lista.map(c => ({
       nome: c.name || c.username || c.notes || 'Sem nome',
-      telefone: c.whatsapp || c.phone || c.telefone || '',
-      expiration: c.expiration_date || c.expiry || c.vencimento || c.expires_at
+      telefone: c.whatsapp || c.phone || '',
+      expiration: c.expiration_date || c.vencimento || c.expires_at
     }));
 
-    // Atualiza o cache local para evitar consultas excessivas ao Sigma
     await db.run(
       `INSERT INTO clientes_cache (user_id, clientes, updated_at)
        VALUES (?, ?, ?)
@@ -134,10 +133,10 @@ async function buscarClientes(userId, emitLog) {
       [userId, JSON.stringify(clientes), new Date().toISOString()]
     );
 
-    log(emitLog, userId, `🏆 ${clientes.length} clientes sincronizados com sucesso.`);
+    log(emitLog, userId, `🏆 ${clientes.length} clientes sincronizados.`);
     return clientes;
   } catch (err) {
-    log(emitLog, userId, `❌ Erro na sincronização: ${err.message}`);
+    log(emitLog, userId, `❌ Erro na sincronização: Túnel instável.`);
     return null;
   }
 }
