@@ -3,6 +3,9 @@ const axios = require('axios');
 const { getDb } = require('./database');
 const fs = require('fs');
 const path = require('path');
+const puppeteer = require('puppeteer-extra');
+const StealthPlugin = require('puppeteer-extra-plugin-stealth');
+puppeteer.use(StealthPlugin());
 
 function log(emitLog, userId, msg) {
   console.log(`[USR:${userId}] ${msg}`);
