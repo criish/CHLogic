@@ -1,28 +1,30 @@
 const puppeteer = require('puppeteer');
 const axios = require('axios');
 const { getDb } = require('./database');
+const fs = require('fs');
+const path = require('path');
 
 function log(emitLog, userId, msg) {
+  console.log(`[USR:${userId}] ${msg}`);
   emitLog(userId, msg);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// CAPTURA AUTOMÁTICA DE TOKEN E ENDPOINT (SNIFFER)
+// CAPTURA AUTOMÁTICA (O "SNIFFER" INTEGRADO)
 // ─────────────────────────────────────────────────────────────────────────────
 async function capturarToken(userId, emitLog) {
   const db = await getDb();
   const user = await db.get('SELECT * FROM users WHERE id = ?', [userId]);
 
   if (!user?.sigma_url || !user?.sigma_user || !user?.sigma_pass) {
-    log(emitLog, userId, '❌ Configure URL, Usuário e Senha no painel.');
+    log(emitLog, userId, '❌ Configurações ausentes (URL, User ou Pass).');
     return null;
   }
 
-  log(emitLog, userId, `🚀 Abrindo navegador na Oracle para: ${user.sigma_url}`);
+  log(emitLog, userId, `🚀 Abrindo navegador na Oracle: ${user.sigma_url}`);
 
   let browser;
   try {
-    // Configurações específicas para rodar em VPS Linux (Oracle)
     browser = await puppeteer.launch({ 
       headless: 'new', 
       args: [
@@ -34,6 +36,8 @@ async function capturarToken(userId, emitLog) {
     });
     
     const page = await browser.newPage();
+    // Simula um navegador real para evitar bloqueios de segurança
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36');
     await page.setViewport({ width: 1366, height: 768 });
 
     let capturedToken = null;
@@ -45,17 +49,17 @@ async function capturarToken(userId, emitLog) {
       const url = request.url();
       const headers = request.headers();
 
-      // Ignora Sentry e telemetria para não capturar URLs erradas
-      if (url.includes('smart-ti.com') || url.includes('sentry')) {
+      // Ignora lixo de telemetria (Sentry/Smart-TI)
+      if (url.includes('smart-ti.com') || url.includes('sentry') || url.includes('envelope')) {
         return request.continue();
       }
 
-      // 1. Captura o Token Bearer
+      // 1. Captura Token Bearer
       if (headers['authorization']?.startsWith('Bearer ')) {
         capturedToken = headers['authorization'].replace('Bearer ', '').trim();
       }
 
-      // 2. Detecta o endpoint de clientes/usuários
+      // 2. Detecta Endpoint de Clientes (Sigma ou Petflow)
       const termosChave = ['customer', 'client', 'agendamento', 'user', 'member'];
       const ehApi = url.includes('/api/');
       const temTermo = termosChave.some(t => url.toLowerCase().includes(t));
@@ -67,38 +71,53 @@ async function capturarToken(userId, emitLog) {
       request.continue();
     });
 
-    // Passo 1: Acessar a URL inicial
+    // PASSO 1: Carregar Página
     await page.goto(user.sigma_url, { waitUntil: 'networkidle2', timeout: 60000 });
-
-    // Passo 2: Login com Espera e Digitação Humana (Evita bloqueios em VPS)
-    const userSelector = 'input[type="text"], input[name="username"], input[name="email"]';
     
-    try {
-      log(emitLog, userId, '⏳ Aguardando campos de login...');
-      await page.waitForSelector(userSelector, { timeout: 15000 });
+    // Tira print do estado inicial (Debug)
+    await page.screenshot({ path: 'debug_1_inicial.png' });
 
+    // PASSO 2: Login "Blindado"
+    try {
+      log(emitLog, userId, '⏳ Localizando campos de login...');
+      await page.waitForSelector('input', { timeout: 20000 });
+
+      const inputs = await page.$$('input');
+      // No Sigma/UFO: Geralmente o primeiro input é o user, e o que tem type="password" é a senha
       log(emitLog, userId, '📝 Preenchendo credenciais...');
-      await page.type(userSelector, user.sigma_user, { delay: 60 });
-      await page.type('input[type="password"]', user.sigma_pass, { delay: 60 });
       
+      // Digita o Usuário
+      await inputs[0].click({ clickCount: 3 });
+      await inputs[0].type(user.sigma_user, { delay: 60 });
+      
+      // Digita a Senha
+      const passField = await page.$('input[type="password"]');
+      if (passField) {
+        await passField.type(user.sigma_pass, { delay: 60 });
+      } else if (inputs[1]) {
+        await inputs[1].type(user.sigma_pass, { delay: 60 });
+      }
+
       await page.keyboard.press('Enter');
-      
-      log(emitLog, userId, '⏳ Aguardando redirecionamento do painel...');
+      log(emitLog, userId, '⏳ Aguardando processamento do login...');
       await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 20000 }).catch(() => {});
+      
     } catch (e) {
-      log(emitLog, userId, '⚠️ Falha ao localizar campos ou tempo esgotado.');
+      log(emitLog, userId, '⚠️ Falha na interação de login. Verifique o screenshot de erro.');
+      await page.screenshot({ path: 'error_login_step.png' });
     }
 
-    // Passo 3: Forçar navegação para Clientes (Indispensável para UFO PLAY)
-    log(emitLog, userId, '📂 Acessando aba de Clientes para forçar disparo da API...');
+    // PASSO 3: Navegação Forçada (Crucial para o UFO PLAY disparar a API)
+    log(emitLog, userId, '📂 Navegando para a aba de Clientes...');
     const baseUrl = user.sigma_url.replace(/\/$/, '').split('#')[0];
     await page.goto(`${baseUrl}/#/customers`, { waitUntil: 'networkidle2' }).catch(() => {});
     
-    // Espera a API ser chamada e os dados carregarem na Oracle
+    // Espera a rede estabilizar e a API responder
     await new Promise(r => setTimeout(r, 15000));
+    await page.screenshot({ path: 'debug_2_pos_navegacao.png' });
 
     if (capturedToken && detectedEndpoint) {
-      log(emitLog, userId, '✅ Sucesso! Rota e Token capturados e salvos.');
+      log(emitLog, userId, '✅ Sucesso! Rota e Token capturados.');
       
       await db.run(
         `UPDATE users SET 
@@ -113,45 +132,43 @@ async function capturarToken(userId, emitLog) {
       return true;
     }
 
-    log(emitLog, userId, '⚠️ Captura incompleta. Tente novamente ou verifique as credenciais.');
+    log(emitLog, userId, '⚠️ Não foi possível capturar os dados automaticamente.');
     await browser.close();
     return false;
 
   } catch (err) {
     if (browser) await browser.close();
-    log(emitLog, userId, `❌ Erro fatal no bot: ${err.message}`);
+    log(emitLog, userId, `❌ Erro fatal: ${err.message}`);
     return null;
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// BUSCA E SINCRONIZAÇÃO DE CLIENTES (USANDO O CACHE)
+// SINCRONIZAÇÃO DE DADOS (VIA API)
 // ─────────────────────────────────────────────────────────────────────────────
 async function buscarClientes(userId, emitLog) {
   const db = await getDb();
   const user = await db.get('SELECT * FROM users WHERE id = ?', [userId]);
 
-  // Se não houver rota ou token, dispara a captura automática primeiro
   if (!user.sigma_url_api || !user.sigma_token) {
-    log(emitLog, userId, '🔄 Dados de API ausentes. Iniciando captura automática...');
+    log(emitLog, userId, '🔄 Dados ausentes. Iniciando captura automática...');
     const ok = await capturarToken(userId, emitLog);
     if (!ok) return null;
-    // Recarrega o usuário após a captura para pegar o novo token/rota
     return buscarClientes(userId, emitLog);
   }
 
+  log(emitLog, userId, `📡 Sincronizando: ${user.sigma_url_api}`);
+
   try {
-    log(emitLog, userId, '📡 Sincronizando dados com o servidor Sigma...');
     const resp = await axios.get(user.sigma_url_api, {
       headers: { 
         'Authorization': `Bearer ${user.sigma_token}`,
         'Accept': 'application/json',
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
       },
-      params: { limit: 2000, per_page: 2000 } // Tenta buscar o máximo de clientes
+      params: { limit: 3000, per_page: 3000 } 
     });
 
-    // Normaliza a resposta (Sigma costuma usar .data ou .data.data)
     const raw = resp.data.data || resp.data.customers || resp.data.content || resp.data;
     const lista = Array.isArray(raw) ? raw : (raw.data || []);
 
@@ -161,7 +178,6 @@ async function buscarClientes(userId, emitLog) {
       expiration: c.expiration_date || c.expiry || c.vencimento || c.expires_at || c.data_vencimento
     }));
 
-    // Atualiza o cache local para a régua de cobrança
     await db.run(
       `INSERT INTO clientes_cache (user_id, clientes, updated_at) 
        VALUES (?, ?, ?) 
@@ -169,14 +185,13 @@ async function buscarClientes(userId, emitLog) {
       [userId, JSON.stringify(clientes), new Date().toISOString()]
     );
 
-    log(emitLog, userId, `🏆 ${clientes.length} clientes sincronizados com sucesso.`);
+    log(emitLog, userId, `🏆 ${clientes.length} clientes sincronizados.`);
     return clientes;
 
   } catch (err) {
-    log(emitLog, userId, `❌ Erro na sincronização: ${err.message}`);
-    // Se o erro for 401 (Não autorizado), limpa o token para forçar nova captura na próxima vez
+    log(emitLog, userId, `❌ Erro na API: ${err.message}`);
     if (err.response?.status === 401) {
-      log(emitLog, userId, '🔐 Token inválido ou expirado. Será renovado no próximo ciclo.');
+      log(emitLog, userId, '🔐 Token expirado. Tentando renovar...');
       await db.run('UPDATE users SET sigma_token = NULL WHERE id = ?', [userId]);
     }
     return null;
