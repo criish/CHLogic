@@ -1,13 +1,13 @@
 const { fetch, Agent } = require('undici');
 const { getDb } = require('./database');
 
-// Configura o agente para mimetizar um navegador e gerenciar a conexão
+// Configura o agente para gerenciar a conexão de forma otimizada na VPS
 const dispatcher = new Agent({
   keepAliveTimeout: 10,
   keepAliveMaxTimeout: 10,
   pipelining: 1,
   connect: {
-    rejectUnauthorized: false // Evita bloqueios de SSL em VPS
+    rejectUnauthorized: false // Ignora erros de SSL comuns em instâncias Cloud
   }
 });
 
@@ -17,7 +17,7 @@ function log(emitLog, userId, msg) {
 }
 
 /**
- * Autenticação Direta: Tenta obter o token enviando user/pass para a API de login
+ * Autenticação Direta via API (Modo Diagnóstico)
  */
 async function capturarToken(userId, emitLog) {
   const db = await getDb();
@@ -31,15 +31,18 @@ async function capturarToken(userId, emitLog) {
   log(emitLog, userId, '🔐 Autenticando diretamente via API Sigma...');
 
   try {
-    // Monta a URL de login baseada na URL que você forneceu
     const baseUrl = user.sigma_url.replace(/\/$/, '').split('#')[0];
     
+    // Simula cabeçalhos de um navegador real para tentar burlar bloqueios básicos
     const response = await fetch(`${baseUrl}/api/login`, {
       method: 'POST',
       dispatcher,
       headers: {
         'Content-Type': 'application/json',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        'Accept': 'application/json, text/plain, */*',
+        'Origin': baseUrl,
+        'Referer': `${baseUrl}/`,
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
       },
       body: JSON.stringify({
         username: user.sigma_user,
@@ -47,8 +50,24 @@ async function capturarToken(userId, emitLog) {
       })
     });
 
-    const data = await response.json();
-    // Tenta extrair o token de várias estruturas possíveis do Sigma
+    const textResponse = await response.text(); // Captura como texto para validar o conteúdo
+
+    if (!response.ok) {
+      log(emitLog, userId, `❌ Erro HTTP ${response.status}: O servidor recusou a conexão.`);
+      // Exibe os primeiros 200 caracteres da resposta no console da Oracle para debug
+      console.log("Trecho da Resposta do Servidor:", textResponse.substring(0, 200));
+      return null;
+    }
+
+    let data;
+    try {
+      data = JSON.parse(textResponse);
+    } catch (e) {
+      log(emitLog, userId, '❌ Resposta inválida: O servidor não devolveu um JSON.');
+      console.log("Resposta recebida (esperava JSON):", textResponse.substring(0, 300));
+      return null;
+    }
+
     const token = data?.token || data?.access_token || data?.data?.token;
 
     if (token) {
@@ -59,30 +78,30 @@ async function capturarToken(userId, emitLog) {
       );
       return token;
     } else {
-      log(emitLog, userId, '⚠️ Falha no login: Credenciais incorretas ou API mudou.');
+      log(emitLog, userId, '⚠️ Resposta de login sem token. Verifique as credenciais.');
       return null;
     }
   } catch (err) {
-    log(emitLog, userId, `❌ Erro na conexão Undici: ${err.message}`);
+    log(emitLog, userId, `❌ Erro na autenticação: ${err.message}`);
     return null;
   }
 }
 
 /**
- * Sincronização: Busca a lista de clientes usando a rota capturada
+ * Sincronização de Clientes via Undici
  */
 async function buscarClientes(userId, emitLog) {
   const db = await getDb();
   const user = await db.get('SELECT * FROM users WHERE id = ?', [userId]);
 
-  // Usa a rota salva no banco (aquela que capturamos com o Python)
+  // Utiliza a rota capturada anteriormente ou tenta o padrão
   const rotaApi = user.sigma_url_api || `${user.sigma_url.split('#')[0]}/api/customers`;
 
   if (!user.sigma_token) {
-    log(emitLog, userId, '🔄 Token expirado. Iniciando nova autenticação...');
+    log(emitLog, userId, '🔄 Token ausente. Iniciando nova autenticação...');
     const token = await capturarToken(userId, emitLog);
     if (!token) return null;
-    return buscarClientes(userId, emitLog); // Tenta buscar novamente após logar
+    return buscarClientes(userId, emitLog);
   }
 
   log(emitLog, userId, `📡 Sincronizando: ${rotaApi}`);
@@ -99,23 +118,30 @@ async function buscarClientes(userId, emitLog) {
     });
 
     if (response.status === 401) {
-      log(emitLog, userId, '🔐 Acesso negado. Renovando token...');
+      log(emitLog, userId, '🔐 Token expirado ou inválido. Renovando...');
       await db.run('UPDATE users SET sigma_token = NULL WHERE id = ?', [userId]);
       return buscarClientes(userId, emitLog);
     }
 
-    const data = await response.json();
-    // Normaliza a resposta para o formato do CH Logic
-    const raw = data.data || data.customers || data;
+    const textData = await response.text();
+    let data;
+    
+    try {
+      data = JSON.parse(textData);
+    } catch (e) {
+      log(emitLog, userId, '❌ Erro ao processar dados da API.');
+      return null;
+    }
+
+    const raw = data.data || data.customers || data.content || data;
     const lista = Array.isArray(raw) ? raw : (raw.data || []);
 
     const clientes = lista.map(c => ({
-      nome: c.name || c.username || c.notes || 'Sem nome',
-      telefone: c.whatsapp || c.phone || '',
-      expiration: c.expiration_date || c.expiry || c.vencimento
+      nome: c.name || c.username || c.notes || c.cliente?.nome || 'Sem nome',
+      telefone: c.whatsapp || c.phone || c.telefone || c.phone_number || '',
+      expiration: c.expiration_date || c.expiry || c.vencimento || c.expires_at || c.data_vencimento
     }));
 
-    // Atualiza o cache para a régua de cobrança automática
     await db.run(
       `INSERT INTO clientes_cache (user_id, clientes, updated_at)
        VALUES (?, ?, ?)
