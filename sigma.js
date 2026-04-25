@@ -1,4 +1,3 @@
-const puppeteer = require('puppeteer');
 const axios = require('axios');
 const { getDb } = require('./database');
 const fs = require('fs');
