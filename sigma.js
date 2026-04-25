@@ -1,11 +1,10 @@
+const puppeteer = require('puppeteer');
 const { fetch, Agent } = require('undici');
 const { HttpsProxyAgent } = require('https-proxy-agent');
 const { getDb } = require('./database');
 
-// 1. CONFIGURAÇÃO DO TÚNEL (PORTA 8888)
+// 1. CONFIGURAÇÃO DO AGENTE PARA REQUISIÇÕES DE API (APÓS LOGIN)
 const proxyAgent = new HttpsProxyAgent('http://127.0.0.1:8888');
-
-// Aumentamos o timeout para 60s para suportar a latência do túnel SSH
 const dispatcher = new Agent({
   connect: {
     agent: proxyAgent,
@@ -18,72 +17,85 @@ const dispatcher = new Agent({
 
 function log(emitLog, userId, msg) {
   console.log(`[USR:${userId}] ${msg}`);
-  emitLog(userId, msg);
+  if (emitLog) emitLog(userId, msg);
 }
 
 /**
- * Autenticação via Túnel Termius + Gost
+ * Autenticação Robusta usando Puppeteer + Túnel SSH (Porta 8888)
  */
 async function capturarToken(userId, emitLog) {
   const db = await getDb();
   const user = await db.get('SELECT * FROM users WHERE id = ?', [userId]);
 
   if (!user?.sigma_url || !user?.sigma_user || !user?.sigma_pass) {
-    log(emitLog, userId, '❌ Configure URL, Usuário e Senha no painel.');
+    log(emitLog, userId, '❌ Dados do Sigma incompletos no painel.');
     return null;
   }
 
-  // Limpa a URL de qualquer barra ou caractere extra
-  const baseUrl = user.sigma_url.replace(/\/$/, '').split('#')[0];
-  
-  const rotas = [
-    `${baseUrl}/api/login`,
-    `${baseUrl}/api/v1/login`,
-    `${baseUrl}/api/auth/login`
-  ];
+  log(emitLog, userId, '🌐 Abrindo navegador via Túnel (IP Residencial)...');
 
-  log(emitLog, userId, '🔐 Autenticando via Túnel (Porta 8888)...');
+  const browser = await puppeteer.launch({
+    headless: "new",
+    args: [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--proxy-server=http://127.0.0.1:8888' // Usa o túnel do Termius/Gost
+    ]
+  });
 
-  for (const rota of rotas) {
-    try {
-      const response = await fetch(rota, {
-        method: 'POST',
-        dispatcher,
-        headers: {
-          'Content-Type': 'application/json',
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/124.0.0.0'
-        },
-        body: JSON.stringify({
-          username: user.sigma_user,
-          password: user.sigma_pass
-        })
-      });
+  try {
+    const page = await browser.newPage();
+    
+    // Simula um navegador real no Windows
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36');
 
-      if (response.ok) {
-        const data = await response.json();
-        const token = data?.token || data?.access_token || data?.data?.token;
+    const baseUrl = user.sigma_url.replace(/\/$/, '').split('#')[0];
+    log(emitLog, userId, `🔐 Acedendo a ${baseUrl}/login...`);
 
-        if (token) {
-          log(emitLog, userId, `✅ Autenticado com sucesso!`);
-          await db.run(
-            'UPDATE users SET sigma_token = ?, sigma_updated_at = ? WHERE id = ?',
-            [token, new Date().toISOString(), userId]
-          );
-          return token;
-        }
-      }
-    } catch (e) {
-      log(emitLog, userId, `⚠️ Tentando próxima rota devido a lentidão...`);
-      continue;
+    await page.goto(`${baseUrl}/login`, { 
+      waitUntil: 'networkidle2', 
+      timeout: 60000 
+    });
+
+    // Preenchimento dos campos de login
+    log(emitLog, userId, '⌨️ Preenchendo credenciais...');
+    await page.type('input[name="username"]', user.sigma_user);
+    await page.type('input[name="password"]', user.sigma_pass);
+
+    log(emitLog, userId, '🖱️ Clicando no botão de login...');
+    await Promise.all([
+      page.click('button[type="submit"]'),
+      page.waitForNavigation({ waitUntil: 'networkidle2' }),
+    ]);
+
+    // Extração do token (o Sigma geralmente armazena no LocalStorage ou Cookies)
+    const token = await page.evaluate(() => {
+      return localStorage.getItem('token') || 
+             localStorage.getItem('access_token') || 
+             document.cookie.split('; ').find(row => row.startsWith('token='))?.split('=')[1];
+    });
+
+    if (token) {
+      log(emitLog, userId, '✅ Token capturado via Puppeteer!');
+      await db.run(
+        'UPDATE users SET sigma_token = ?, sigma_updated_at = ? WHERE id = ?',
+        [token, new Date().toISOString(), userId]
+      );
+      await browser.close();
+      return token;
     }
-  }
 
-  log(emitLog, userId, '❌ Falha: O Sigma não respondeu a tempo. Verifique o Gost/Termius.');
+    log(emitLog, userId, '❌ Login efetuado, mas o token não foi encontrado.');
+  } catch (err) {
+    log(emitLog, userId, `❌ Erro no Puppeteer: ${err.message}`);
+  } finally {
+    await browser.close();
+  }
   return null;
 }
 
 /**
- * Sincronização de Clientes (CH Stream)
+ * Sincronização de Clientes via API (Usando o token capturado)
  */
 async function buscarClientes(userId, emitLog) {
   const db = await getDb();
@@ -96,13 +108,12 @@ async function buscarClientes(userId, emitLog) {
   }
 
   const rotaApi = user.sigma_url_api || `${user.sigma_url.split('#')[0]}/api/customers`;
-
-  log(emitLog, userId, `📡 Sincronizando clientes via Túnel...`);
+  log(emitLog, userId, `📡 Sincronizando clientes via API (TúnelAtivo)...`);
 
   try {
     const response = await fetch(rotaApi, {
       method: 'GET',
-      dispatcher,
+      dispatcher, // Requisição de API também passa pelo túnel
       headers: {
         'Authorization': `Bearer ${user.sigma_token}`,
         'Accept': 'application/json',
@@ -111,19 +122,19 @@ async function buscarClientes(userId, emitLog) {
     });
 
     if (response.status === 401) {
-      log(emitLog, userId, '🔐 Token expirado. Renovando...');
+      log(emitLog, userId, '🔐 Token expirado. A renovar...');
       await db.run('UPDATE users SET sigma_token = NULL WHERE id = ?', [userId]);
       return buscarClientes(userId, emitLog);
     }
 
     const data = await response.json();
-    const raw = data.data || data.customers || data.content || data;
+    const raw = data.data || data.customers || data;
     const lista = Array.isArray(raw) ? raw : (raw.data || []);
 
     const clientes = lista.map(c => ({
-      nome: c.name || c.username || c.notes || 'Sem nome',
+      nome: c.name || c.username || 'Sem nome',
       telefone: c.whatsapp || c.phone || '',
-      expiration: c.expiration_date || c.vencimento || c.expires_at
+      expiration: c.expiration_date || c.vencimento
     }));
 
     await db.run(
@@ -133,10 +144,10 @@ async function buscarClientes(userId, emitLog) {
       [userId, JSON.stringify(clientes), new Date().toISOString()]
     );
 
-    log(emitLog, userId, `🏆 ${clientes.length} clientes sincronizados.`);
+    log(emitLog, userId, `🏆 Sincronização concluída: ${clientes.length} clientes.`);
     return clientes;
   } catch (err) {
-    log(emitLog, userId, `❌ Erro na sincronização: Túnel instável.`);
+    log(emitLog, userId, `❌ Erro na API: ${err.message}`);
     return null;
   }
 }
