@@ -1,339 +1,108 @@
+// src/server.js
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const session = require('express-session');
-const sqlite3 = require('sqlite3');
-const { open } = require('sqlite');
-const cors = require('cors');
-const crypto = require('crypto');
-const { conectarWhatsApp, desconectarWhatsApp, isConectado, enviarMensagem } = require('./whatsapp');
+const path = require('path');
+
+const { getDb } = require('./database');
+const { agendarJob } = require('./regua');
+const routes = require('./routes');
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server);
+const io = new Server(server, {
+  cors: { origin: '*', methods: ['GET', 'POST'] },
+  pingTimeout: 60000,
+  pingInterval: 25000,
+});
 
-app.use(cors());
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ limit: '50mb', extended: true }));
-app.use(express.static('public'));
+// ─────────────────────────────────────────────────────────────────────────────
+// Middlewares
+// ─────────────────────────────────────────────────────────────────────────────
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+app.use(express.static(path.join(__dirname, 'public')));
 
 const sessionMiddleware = session({
-    secret: 'CH_SNIPER_2026',
-    resave: false,
-    saveUninitialized: false,
-    cookie: { maxAge: 1000 * 60 * 60 * 24 }
+  secret: process.env.SESSION_SECRET || 'CH_SNIPER_2026_SECRET',
+  resave: false,
+  saveUninitialized: false,
+  cookie: { maxAge: 1000 * 60 * 60 * 24, httpOnly: true },
 });
 
 app.use(sessionMiddleware);
+
+// Compartilha sessão com Socket.IO
 io.use((socket, next) => sessionMiddleware(socket.request, {}, next));
 
-let db;
-(async () => {
-    db = await open({ filename: './database.sqlite', driver: sqlite3.Database });
-    await db.exec(`
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT UNIQUE NOT NULL,
-            password TEXT NOT NULL,
-            painel_url TEXT,
-            horario_cobranca TEXT DEFAULT '08:00',
-            ativo INTEGER DEFAULT 1,
-            is_admin INTEGER DEFAULT 0
-        );
-        CREATE TABLE IF NOT EXISTS clientes_cache (
-            user_id INTEGER PRIMARY KEY,
-            clientes TEXT,
-            updated_at TEXT
-        );
-    `);
-
-    const admin = await db.get('SELECT id FROM users WHERE is_admin = 1');
-    if (!admin) {
-        await db.run(
-            `INSERT INTO users (username, password, ativo, is_admin) VALUES ('admin', ?, 1, 1)`,
-            [hashSenha('admin123')]
-        );
-        console.log("👑 Admin criado: admin / admin123");
-    }
-
-    iniciarScheduler();
-})();
-
-// ─────────────────────────────────────────────
-// Utils
-// ─────────────────────────────────────────────
-function hashSenha(senha) {
-    return crypto.createHash('sha256').update(senha).digest('hex');
-}
-
+// ─────────────────────────────────────────────────────────────────────────────
+// emitLog: envia log para o room do usuário via Socket.IO
+// ─────────────────────────────────────────────────────────────────────────────
 function emitLog(userId, msg) {
-    io.to(`room_${userId}`).emit('novo_log', `[${new Date().toLocaleTimeString()}] ${msg}`);
+  const timestamp = new Date().toLocaleTimeString('pt-BR');
+  io.to(`room_${userId}`).emit('log', `[${timestamp}] ${msg}`);
+  console.log(`[USR:${userId}] ${msg}`);
 }
 
-function requireAuth(req, res, next) {
-    if (!req.session.userId) return res.status(401).json({ error: 'Não autenticado' });
-    next();
-}
+// Disponibiliza emitLog e io para as routes via app.set
+app.set('emitLog', emitLog);
+app.set('io', io);
 
-function requireAdmin(req, res, next) {
-    if (!req.session.isAdmin) return res.status(403).json({ error: 'Sem permissão' });
-    next();
-}
+// ─────────────────────────────────────────────────────────────────────────────
+// Rotas
+// ─────────────────────────────────────────────────────────────────────────────
+app.use('/api', routes);
 
-// ─────────────────────────────────────────────
-// Régua de cobrança
-// ─────────────────────────────────────────────
-function processarRegua(userId, clientes) {
-    const regua = [-7, -5, -3, -1, 0, 1, 3, 5, 7];
-    const hoje = new Date();
-    hoje.setHours(0, 0, 0, 0);
-    let count = 0;
-    const naRegua = [];
-
-    clientes.forEach((c) => {
-        const exp = c.expiration || c.expiry || c.expires_at || c.vencimento || c.due_date || c.expiryDate;
-        if (exp) {
-            const dtVenc = new Date(exp);
-            dtVenc.setHours(0, 0, 0, 0);
-            const diffDays = Math.ceil((dtVenc - hoje) / (1000 * 60 * 60 * 24));
-            if (regua.includes(diffDays)) {
-                const nome = c.notes || c.name || c.username || 'Sem nome';
-                const zap = c.whatsapp || c.phone || c.telefone || c.mobile || 'N/A';
-                emitLog(userId, `📍 [DIA ${diffDays > 0 ? '+' : ''}${diffDays}] ${nome} | Zap: ${zap}`);
-                naRegua.push({ nome, zap, diffDays });
-                count++;
-            }
-        }
-    });
-
-    emitLog(userId, `🏆 Varredura finalizada. ${count} cliente(s) na régua.`);
-    return naRegua;
-}
-
-// ─────────────────────────────────────────────
-// Scheduler automático
-// ─────────────────────────────────────────────
-function iniciarScheduler() {
-    console.log("⏰ Scheduler iniciado.");
-    setInterval(async () => {
-        const agora = new Date();
-        const horaAtual = `${String(agora.getHours()).padStart(2, '0')}:${String(agora.getMinutes()).padStart(2, '0')}`;
-        const usuarios = await db.all('SELECT * FROM users WHERE ativo = 1 AND is_admin = 0');
-
-        for (const user of usuarios) {
-            if (user.horario_cobranca === horaAtual) {
-                emitLog(user.id, `⏰ Horário agendado! Iniciando varredura automática...`);
-                const cache = await db.get('SELECT * FROM clientes_cache WHERE user_id = ?', [user.id]);
-                if (cache?.clientes) {
-                    const clientes = JSON.parse(cache.clientes);
-                    emitLog(user.id, `📦 ${clientes.length} clientes no cache. Processando...`);
-                    const naRegua = processarRegua(user.id, clientes);
-
-                    // Envia WhatsApp se estiver conectado
-                    if (isConectado(user.id) && naRegua.length > 0) {
-                        emitLog(user.id, `📱 Iniciando envio de mensagens...`);
-                        for (const cliente of naRegua) {
-                            if (cliente.zap && cliente.zap !== 'N/A') {
-                                const msg = gerarMensagem(cliente.nome, cliente.diffDays);
-                                await enviarMensagem(user.id, cliente.zap, msg, emitLog);
-                                await new Promise(r => setTimeout(r, 2000)); // delay entre mensagens
-                            }
-                        }
-                    }
-                } else {
-                    emitLog(user.id, `⚠️ Sem cache. Acesse o Sigma e clique em 'Clientes'.`);
-                }
-            }
-        }
-    }, 60 * 1000);
-}
-
-// Gera mensagem personalizada por dia da régua
-function gerarMensagem(nome, diffDays) {
-    if (diffDays < 0) {
-        return `Olá ${nome}! 👋\n\nSeu plano IPTV venceu há ${Math.abs(diffDays)} dia(s). Renove agora para não ficar sem acesso!\n\nQualquer dúvida, estamos à disposição. 😊`;
-    } else if (diffDays === 0) {
-        return `Olá ${nome}! ⚠️\n\nSeu plano IPTV vence *hoje*! Renove agora para não perder o acesso.\n\nEstamos à disposição! 😊`;
-    } else {
-        return `Olá ${nome}! 📅\n\nSeu plano IPTV vence em *${diffDays} dia(s)*. Renove com antecedência para não ter interrupção!\n\nQualquer dúvida, fale conosco. 😊`;
-    }
-}
-
-// ─────────────────────────────────────────────
-// AUTH ROUTES
-// ─────────────────────────────────────────────
-app.post('/api/login', async (req, res) => {
-    const { user, pass } = req.body;
-    const found = await db.get('SELECT * FROM users WHERE username = ?', [user]);
-    if (!found || found.password !== hashSenha(pass))
-        return res.status(401).json({ error: 'Usuário ou senha inválidos' });
-    if (!found.ativo)
-        return res.status(403).json({ error: 'Conta suspensa. Contate o suporte.' });
-    req.session.userId = found.id;
-    req.session.isAdmin = found.is_admin === 1;
-    res.json({ success: true, isAdmin: found.is_admin === 1 });
+// SPA fallback — qualquer rota não-API serve o index.html
+app.get(/^(?!\/api).*/, (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-app.post('/api/logout', (req, res) => {
-    req.session.destroy();
-    res.json({ success: true });
-});
-
-app.get('/api/me', requireAuth, async (req, res) => {
-    const user = await db.get(
-        'SELECT id, username, painel_url, horario_cobranca, is_admin FROM users WHERE id = ?',
-        [req.session.userId]
-    );
-    res.json(user);
-});
-
-// ─────────────────────────────────────────────
-// CONFIG ROUTES
-// ─────────────────────────────────────────────
-app.get('/api/config', requireAuth, async (req, res) => {
-    const user = await db.get('SELECT painel_url, horario_cobranca FROM users WHERE id = ?', [req.session.userId]);
-    res.json(user || {});
-});
-
-app.post('/api/set-horario', requireAuth, async (req, res) => {
-    const { horario } = req.body;
-    if (!horario || !/^\d{2}:\d{2}$/.test(horario))
-        return res.status(400).json({ error: 'Formato inválido. Use HH:MM' });
-    await db.run('UPDATE users SET horario_cobranca = ? WHERE id = ?', [horario, req.session.userId]);
-    emitLog(req.session.userId, `⏰ Horário de cobrança definido para ${horario}.`);
-    res.json({ success: true, horario });
-});
-
-app.post('/api/rodar-agora', requireAuth, async (req, res) => {
-    const userId = req.session.userId;
-    const cache = await db.get('SELECT * FROM clientes_cache WHERE user_id = ?', [userId]);
-    if (cache?.clientes) {
-        const clientes = JSON.parse(cache.clientes);
-        emitLog(userId, `▶️ Varredura manual iniciada. ${clientes.length} clientes no cache.`);
-        processarRegua(userId, clientes);
-        res.json({ success: true });
-    } else {
-        emitLog(userId, `⚠️ Sem cache. Abra o Sigma e clique em 'Clientes' primeiro.`);
-        res.json({ success: false });
-    }
-});
-
-// ─────────────────────────────────────────────
-// WHATSAPP ROUTES
-// ─────────────────────────────────────────────
-app.post('/api/whatsapp/conectar', requireAuth, async (req, res) => {
-    const userId = req.session.userId;
-    const { phone } = req.body; // opcional — se vier, usa código de pareamento
-    emitLog(userId, `📱 Iniciando conexão WhatsApp...`);
-    await conectarWhatsApp(userId, io, emitLog, phone || null);
-    res.json({ success: true });
-});
-
-app.post('/api/whatsapp/desconectar', requireAuth, async (req, res) => {
-    const userId = req.session.userId;
-    await desconectarWhatsApp(userId, emitLog);
-    io.to(`room_${userId}`).emit('whatsapp_status', { connected: false });
-    res.json({ success: true });
-});
-
-app.get('/api/whatsapp/status', requireAuth, (req, res) => {
-    res.json({ connected: isConectado(req.session.userId) });
-});
-
-// ─────────────────────────────────────────────
-// SYNC ROUTES (chamadas pela extensão)
-// ─────────────────────────────────────────────
-app.post('/api/sync-clientes', async (req, res) => {
-    const { userId, clientes } = req.body;
-    if (!userId || !clientes || !Array.isArray(clientes))
-        return res.status(400).json({ error: 'Dados inválidos' });
-
-    const user = await db.get('SELECT id FROM users WHERE id = ? AND ativo = 1', [userId]);
-    if (!user) return res.status(403).json({ error: 'Usuário inválido' });
-
-    await db.run(`
-        INSERT INTO clientes_cache (user_id, clientes, updated_at)
-        VALUES (?, ?, ?)
-        ON CONFLICT(user_id) DO UPDATE SET clientes = excluded.clientes, updated_at = excluded.updated_at
-    `, [userId, JSON.stringify(clientes), new Date().toISOString()]);
-
-    emitLog(userId, `📦 ${clientes.length} clientes recebidos e salvos em cache.`);
-    const naRegua = processarRegua(userId, clientes);
-    res.json({ success: true, count: naRegua.length });
-});
-
-app.post('/api/sync-log', async (req, res) => {
-    const { userId, msg } = req.body;
-    if (userId && msg) emitLog(userId, msg);
-    res.json({ success: true });
-});
-
-// ─────────────────────────────────────────────
-// ADMIN ROUTES
-// ─────────────────────────────────────────────
-app.post('/api/admin/login', async (req, res) => {
-    const { user, pass } = req.body;
-    const found = await db.get('SELECT * FROM users WHERE username = ? AND is_admin = 1', [user]);
-    if (!found || found.password !== hashSenha(pass))
-        return res.status(401).json({ error: 'Acesso negado' });
-    req.session.userId = found.id;
-    req.session.isAdmin = true;
-    res.json({ success: true });
-});
-
-app.get('/api/admin/users', requireAdmin, async (req, res) => {
-    const users = await db.all('SELECT id, username, ativo, horario_cobranca FROM users WHERE is_admin = 0');
-    res.json(users);
-});
-
-app.post('/api/admin/users', requireAdmin, async (req, res) => {
-    const { username, password } = req.body;
-    if (!username || !password) return res.status(400).json({ error: 'Dados incompletos' });
-    try {
-        await db.run(
-            'INSERT INTO users (username, password, ativo, is_admin) VALUES (?, ?, 1, 0)',
-            [username, hashSenha(password)]
-        );
-        res.json({ success: true });
-    } catch (e) {
-        res.status(400).json({ error: 'Usuário já existe' });
-    }
-});
-
-app.post('/api/admin/users/toggle', requireAdmin, async (req, res) => {
-    const { id, ativo } = req.body;
-    await db.run('UPDATE users SET ativo = ? WHERE id = ? AND is_admin = 0', [ativo, id]);
-    res.json({ success: true });
-});
-
-app.delete('/api/admin/users/:id', requireAdmin, async (req, res) => {
-    await db.run('DELETE FROM users WHERE id = ? AND is_admin = 0', [req.params.id]);
-    await db.run('DELETE FROM clientes_cache WHERE user_id = ?', [req.params.id]);
-    res.json({ success: true });
-});
-
-// ─────────────────────────────────────────────
-// SOCKET.IO
-// ─────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// Socket.IO
+// ─────────────────────────────────────────────────────────────────────────────
 io.on('connection', (socket) => {
-    const userId = socket.request.session?.userId;
-    if (!userId) return;
+  const userId = socket.request.session?.userId;
+  if (!userId) return;
 
-    socket.join(`room_${userId}`);
+  socket.join(`room_${userId}`);
+  console.log(`🔌 Socket conectado: usuário ${userId}`);
 
-    // Envia status atual do WhatsApp ao conectar
-    socket.emit('whatsapp_status', { connected: isConectado(userId) });
+  // Envia status atual do WhatsApp ao conectar
+  const { getStatus } = require('./whatsapp');
+  socket.emit('whatsapp_status', getStatus(userId));
 
-    socket.on('save_config', async (d) => {
-        await db.run('UPDATE users SET painel_url = ? WHERE id = ?', [d.url, userId]);
-        socket.emit('open_sigma_tab', { url: d.url });
-    });
-
-    socket.on('set_horario', async (d) => {
-        if (!/^\d{2}:\d{2}$/.test(d.horario)) return;
-        await db.run('UPDATE users SET horario_cobranca = ? WHERE id = ?', [d.horario, userId]);
-        emitLog(userId, `⏰ Horário definido: ${d.horario} todos os dias.`);
-    });
+  socket.on('disconnect', () => {
+    console.log(`🔌 Socket desconectado: usuário ${userId}`);
+  });
 });
 
-server.listen(3000, () => console.log("🚀 CH Logic Sniper Online na porta 3000!"));
+// ─────────────────────────────────────────────────────────────────────────────
+// Inicialização
+// ─────────────────────────────────────────────────────────────────────────────
+async function init() {
+  const db = await getDb();
+
+  // Agenda jobs para todos os usuários ativos
+  const users = await db.all('SELECT id, horario_cobranca FROM users WHERE ativo = 1 AND is_admin = 0');
+  for (const u of users) {
+    if (u.horario_cobranca) {
+      agendarJob(u.id, u.horario_cobranca, emitLog);
+    }
+  }
+  console.log(`⏰ ${users.length} job(s) agendado(s).`);
+
+  const PORT = process.env.PORT || 3000;
+  server.listen(PORT, () => {
+    console.log(`\n🚀 CH Logic Sniper v4.0 rodando em http://localhost:${PORT}`);
+    console.log(`🔑 Admin padrão: admin / admin123`);
+    console.log(`📋 Painel: http://localhost:${PORT}`);
+    console.log(`🛡️  Admin: http://localhost:${PORT}/admin.html\n`);
+  });
+}
+
+init().catch((err) => {
+  console.error('❌ Erro fatal na inicialização:', err);
+  process.exit(1);
+});

@@ -1,157 +1,63 @@
 <!DOCTYPE html>
 <html lang="pt-br">
 <head>
-    <meta charset="UTF-8">
-    <title>Login | CH Logic</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            background: #0f1117;
-            color: white;
-            font-family: 'Segoe UI', sans-serif;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            height: 100vh;
-        }
-        .card {
-            background: #161b27;
-            border: 1px solid #1e2535;
-            padding: 2.5rem;
-            border-radius: 16px;
-            width: 340px;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.4);
-        }
-        .logo {
-            text-align: center;
-            margin-bottom: 2rem;
-        }
-        .logo h1 {
-            font-size: 1.8rem;
-            color: #00c896;
-            font-weight: 800;
-            letter-spacing: 2px;
-        }
-        .logo p {
-            font-size: 0.82rem;
-            color: #556;
-            margin-top: 4px;
-        }
-        .form-group {
-            margin-bottom: 14px;
-        }
-        .form-group label {
-            display: block;
-            font-size: 0.78rem;
-            color: #778;
-            margin-bottom: 6px;
-            font-weight: 500;
-        }
-        input {
-            width: 100%;
-            padding: 11px 14px;
-            border-radius: 8px;
-            border: 1px solid #1e2535;
-            background: #0f1117;
-            color: white;
-            font-size: 0.9rem;
-            outline: none;
-            transition: border 0.2s;
-        }
-        input:focus { border-color: #00c896; }
-        button {
-            width: 100%;
-            padding: 12px;
-            background: #00c896;
-            border: none;
-            border-radius: 8px;
-            color: #000;
-            font-weight: 700;
-            font-size: 0.95rem;
-            cursor: pointer;
-            margin-top: 8px;
-            transition: opacity 0.2s;
-        }
-        button:hover { opacity: 0.9; }
-        .erro {
-            color: #e74c3c;
-            font-size: 0.82rem;
-            text-align: center;
-            margin-top: 12px;
-            display: none;
-        }
-        .footer {
-            text-align: center;
-            margin-top: 1.5rem;
-            font-size: 0.75rem;
-            color: #334;
-        }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CH Logic | Login</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:#080c14;color:#e0e0e0;font-family:'Segoe UI',sans-serif;min-height:100vh;display:flex;justify-content:center;align-items:center;background-image:radial-gradient(ellipse at 20% 50%,rgba(0,200,150,.06) 0,transparent 60%),radial-gradient(ellipse at 80% 20%,rgba(59,158,255,.06) 0,transparent 60%)}
+.card{background:#0f1521;border:1px solid #1a2540;border-radius:20px;padding:40px 36px;width:360px;box-shadow:0 30px 80px rgba(0,0,0,.5)}
+.logo{text-align:center;margin-bottom:32px}
+.logo-text{font-size:2rem;font-weight:900;letter-spacing:3px;background:linear-gradient(135deg,#00c896,#3b9eff);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.logo-sub{font-size:.78rem;color:#3a4a60;margin-top:4px;letter-spacing:1px}
+.form-group{margin-bottom:16px}
+.form-group label{display:block;font-size:.75rem;color:#556;margin-bottom:6px;font-weight:600;text-transform:uppercase;letter-spacing:.8px}
+input{width:100%;padding:12px 14px;background:#080c14;border:1px solid #1a2540;border-radius:10px;color:#e0e0e0;font-size:.9rem;outline:none;transition:border .2s,box-shadow .2s}
+input:focus{border-color:#00c896;box-shadow:0 0 0 3px rgba(0,200,150,.1)}
+.btn{width:100%;padding:13px;border:none;border-radius:10px;background:linear-gradient(135deg,#00c896,#00a87a);color:#000;font-weight:700;font-size:.92rem;cursor:pointer;transition:opacity .2s,transform .1s;margin-top:8px}
+.btn:hover{opacity:.9}
+.btn:active{transform:scale(.98)}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.erro{background:rgba(231,76,60,.1);border:1px solid rgba(231,76,60,.3);border-radius:8px;color:#e74c3c;font-size:.82rem;padding:10px 14px;margin-top:12px;display:none}
+.footer{text-align:center;margin-top:24px;font-size:.72rem;color:#1a2540}
+</style>
 </head>
 <body>
-    <div class="card">
-        <div class="logo">
-            <h1>CH LOGIC</h1>
-            <p>Painel de Automação IPTV</p>
-        </div>
-
-        <div class="form-group">
-            <label>Usuário</label>
-            <input type="text" id="user" placeholder="seu_usuario" autocomplete="username" />
-        </div>
-        <div class="form-group">
-            <label>Senha</label>
-            <input type="password" id="pass" placeholder="••••••••" autocomplete="current-password"
-                   onkeydown="if(event.key==='Enter') login()" />
-        </div>
-
-        <button onclick="login()" id="btnLogin">Entrar no Sistema</button>
-        <p class="erro" id="erro"></p>
-
-        <div class="footer">CH Logic © 2026 | Todos os direitos reservados</div>
-    </div>
-
-    <script>
-        async function login() {
-            const user = document.getElementById('user').value.trim();
-            const pass = document.getElementById('pass').value;
-            const erro = document.getElementById('erro');
-            const btn = document.getElementById('btnLogin');
-
-            if (!user || !pass) {
-                erro.textContent = 'Preencha usuário e senha.';
-                erro.style.display = 'block';
-                return;
-            }
-
-            btn.textContent = 'Entrando...';
-            btn.disabled = true;
-            erro.style.display = 'none';
-
-            try {
-                const res = await fetch('/api/login', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ user, pass })
-                });
-
-                const data = await res.json();
-
-                if (res.ok) {
-                    window.location.href = '/';
-                } else {
-                    erro.textContent = data.error || 'Usuário ou senha inválidos.';
-                    erro.style.display = 'block';
-                    btn.textContent = 'Entrar no Sistema';
-                    btn.disabled = false;
-                }
-            } catch(e) {
-                erro.textContent = 'Erro de conexão com o servidor.';
-                erro.style.display = 'block';
-                btn.textContent = 'Entrar no Sistema';
-                btn.disabled = false;
-            }
-        }
-    </script>
+<div class="card">
+  <div class="logo">
+    <div class="logo-text">CH LOGIC</div>
+    <div class="logo-sub">SISTEMA DE COBRANÇA IPTV</div>
+  </div>
+  <div class="form-group">
+    <label>Usuário</label>
+    <input type="text" id="user" placeholder="seu_usuario" autocomplete="username"/>
+  </div>
+  <div class="form-group">
+    <label>Senha</label>
+    <input type="password" id="pass" placeholder="••••••••" autocomplete="current-password"
+           onkeydown="if(event.key==='Enter')login()"/>
+  </div>
+  <button class="btn" id="btn" onclick="login()">Entrar no Sistema</button>
+  <div class="erro" id="erro"></div>
+  <div class="footer">CH Logic © 2026 — Todos os direitos reservados</div>
+</div>
+<script>
+async function login(){
+  const user=document.getElementById('user').value.trim();
+  const pass=document.getElementById('pass').value;
+  const erro=document.getElementById('erro');
+  const btn=document.getElementById('btn');
+  erro.style.display='none';
+  if(!user||!pass){erro.textContent='Preencha usuário e senha.';erro.style.display='block';return;}
+  btn.textContent='Entrando...';btn.disabled=true;
+  try{
+    const r=await fetch('/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user,pass})});
+    const d=await r.json();
+    if(r.ok){window.location.href='/';}
+    else{erro.textContent=d.error||'Credenciais inválidas.';erro.style.display='block';btn.textContent='Entrar no Sistema';btn.disabled=false;}
+  }catch(e){erro.textContent='Erro de conexão.';erro.style.display='block';btn.textContent='Entrar no Sistema';btn.disabled=false;}
+}
+</script>
 </body>
 </html>

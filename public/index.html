@@ -1,320 +1,489 @@
 <!DOCTYPE html>
-<html lang="pt-BR">
+<html lang="pt-br">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CH Logic | Painel</title>
-    <script src="/socket.io/socket.io.js"></script>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: 'Segoe UI', sans-serif; background: #0f1117; color: #e0e0e0; min-height: 100vh; }
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CH Logic | Painel</title>
+<script src="/socket.io/socket.io.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#080c14;--surface:#0f1521;--border:#1a2540;--text:#e0e0e0;--muted:#3a4a60;
+  --green:#00c896;--blue:#3b9eff;--red:#e74c3c;--yellow:#f39c12;--purple:#9b59b6;
+}
+body{background:var(--bg);color:var(--text);font-family:'Segoe UI',sans-serif;min-height:100vh;display:flex;flex-direction:column}
 
-        header {
-            background: #161b27;
-            padding: 14px 32px;
-            border-bottom: 1px solid #1e2535;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-        }
-        .header-left { display: flex; align-items: center; gap: 12px; }
-        header h1 { font-size: 1.1rem; font-weight: 700; color: #fff; }
-        .badge { background: #00c896; color: #000; font-size: 0.65rem; font-weight: 700; padding: 2px 8px; border-radius: 20px; }
-        .header-right { display: flex; align-items: center; gap: 16px; }
-        .user-info { font-size: 0.82rem; color: #556; }
-        .user-info strong { color: #00c896; }
-        .btn-logout {
-            background: transparent;
-            border: 1px solid #2a3347;
-            color: #778;
-            padding: 6px 14px;
-            border-radius: 6px;
-            font-size: 0.8rem;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-        .btn-logout:hover { border-color: #e74c3c; color: #e74c3c; }
+/* ── Header ── */
+header{background:var(--surface);border-bottom:1px solid var(--border);padding:12px 24px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100}
+.logo{font-size:1.1rem;font-weight:900;letter-spacing:2px;background:linear-gradient(135deg,var(--green),var(--blue));-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.badge{background:var(--green);color:#000;font-size:.6rem;font-weight:800;padding:2px 8px;border-radius:20px;margin-left:8px;vertical-align:middle;-webkit-text-fill-color:#000}
+.header-right{display:flex;align-items:center;gap:14px}
+.user-chip{background:var(--bg);border:1px solid var(--border);border-radius:20px;padding:5px 14px;font-size:.8rem;color:var(--muted)}
+.user-chip strong{color:var(--green)}
+.btn-sm{padding:6px 14px;border:1px solid var(--border);border-radius:8px;background:transparent;color:var(--muted);font-size:.78rem;cursor:pointer;transition:all .2s}
+.btn-sm:hover{border-color:var(--red);color:var(--red)}
+.wa-chip{display:flex;align-items:center;gap:6px;background:var(--bg);border:1px solid var(--border);border-radius:20px;padding:5px 12px;font-size:.78rem}
+.wa-dot{width:8px;height:8px;border-radius:50%;background:var(--red)}
+.wa-dot.on{background:var(--green);box-shadow:0 0 6px var(--green)}
 
-        .container {
-            display: grid;
-            grid-template-columns: 360px 1fr;
-            gap: 20px;
-            padding: 20px 28px;
-            max-width: 1300px;
-            margin: 0 auto;
-        }
+/* ── Layout ── */
+.main{display:grid;grid-template-columns:320px 1fr;gap:16px;padding:16px 20px;flex:1;max-width:1400px;width:100%;margin:0 auto}
 
-        .card {
-            background: #161b27;
-            border: 1px solid #1e2535;
-            border-radius: 12px;
-            padding: 22px;
-        }
-        .card h2 {
-            font-size: 0.78rem;
-            font-weight: 700;
-            color: #556;
-            text-transform: uppercase;
-            letter-spacing: 1.5px;
-            margin-bottom: 18px;
-        }
+/* ── Cards ── */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:20px}
+.card-title{font-size:.7rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:16px;display:flex;align-items:center;gap:6px}
 
-        .form-group { margin-bottom: 14px; }
-        .form-group label { display: block; font-size: 0.78rem; color: #778; margin-bottom: 5px; }
-        .form-group input {
-            width: 100%;
-            background: #0f1117;
-            border: 1px solid #1e2535;
-            border-radius: 8px;
-            padding: 10px 12px;
-            color: #fff;
-            font-size: 0.88rem;
-            outline: none;
-            transition: border 0.2s;
-        }
-        .form-group input:focus { border-color: #00c896; }
+/* ── Forms ── */
+.fg{margin-bottom:12px}
+.fg label{display:block;font-size:.72rem;color:var(--muted);margin-bottom:5px;font-weight:600;letter-spacing:.5px}
+input,select{width:100%;padding:9px 12px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:.85rem;outline:none;transition:border .2s}
+input:focus,select:focus{border-color:var(--green)}
+.row{display:flex;gap:8px}
+.row input{flex:1}
 
-        .btn {
-            width: 100%;
-            padding: 11px;
-            border: none;
-            border-radius: 8px;
-            font-size: 0.88rem;
-            font-weight: 600;
-            cursor: pointer;
-            margin-bottom: 8px;
-            transition: opacity 0.2s, transform 0.1s;
-        }
-        .btn:active { transform: scale(0.98); }
-        .btn:hover { opacity: 0.88; }
-        .btn-primary { background: #00c896; color: #000; }
-        .btn-secondary { background: #1e2a3a; color: #aab; }
-        .btn-warning { background: #f39c12; color: #000; }
+/* ── Buttons ── */
+.btn{padding:10px 18px;border:none;border-radius:9px;font-size:.83rem;font-weight:700;cursor:pointer;transition:opacity .15s,transform .1s;display:inline-flex;align-items:center;gap:6px;justify-content:center}
+.btn:active{transform:scale(.97)}
+.btn:hover{opacity:.88}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn-full{width:100%;margin-bottom:8px}
+.btn-primary{background:linear-gradient(135deg,var(--green),#00a87a);color:#000}
+.btn-blue{background:linear-gradient(135deg,var(--blue),#1a7ae0);color:#fff}
+.btn-danger{background:var(--red);color:#fff}
+.btn-warn{background:var(--yellow);color:#000}
+.btn-ghost{background:var(--border);color:var(--text)}
 
-        .divider { border: none; border-top: 1px solid #1e2535; margin: 18px 0; }
-        .section-label { font-size: 0.72rem; color: #445; text-transform: uppercase; letter-spacing: 1px; margin: 14px 0 8px; }
+/* ── Divider ── */
+hr{border:none;border-top:1px solid var(--border);margin:14px 0}
 
-        .info-box {
-            background: #0f1117;
-            border: 1px solid #1e2535;
-            border-radius: 8px;
-            padding: 10px 13px;
-            font-size: 0.8rem;
-            color: #667;
-            margin-top: 6px;
-        }
-        .info-box strong { color: #00c896; }
+/* ── Status blocks ── */
+.info-row{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px 12px;font-size:.8rem;color:var(--muted);margin-top:8px}
+.info-row strong{color:var(--green)}
+.status-tag{display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:14px;font-size:.75rem;font-weight:700}
+.tag-ok{background:rgba(0,200,150,.12);color:var(--green)}
+.tag-err{background:rgba(231,76,60,.12);color:var(--red)}
+.tag-warn{background:rgba(243,156,18,.12);color:var(--yellow)}
 
-        .status-badge {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-            padding: 5px 12px;
-            border-radius: 20px;
-            font-size: 0.78rem;
-            font-weight: 600;
-        }
-        .status-badge.connected { background: #0d3327; color: #00c896; }
-        .status-badge.disconnected { background: #2e1a1a; color: #e74c3c; }
-        .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; animation: pulse 1.5s infinite; }
-        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+/* ── Tabs ── */
+.tabs{display:flex;gap:4px;margin-bottom:14px;background:var(--bg);border-radius:10px;padding:4px;border:1px solid var(--border)}
+.tab{flex:1;padding:7px;border:none;border-radius:7px;background:transparent;color:var(--muted);font-size:.78rem;font-weight:600;cursor:pointer;transition:all .2s}
+.tab.active{background:var(--surface);color:var(--text);box-shadow:0 1px 4px rgba(0,0,0,.3)}
+.tab-content{display:none}
+.tab-content.active{display:block}
 
-        /* LOG */
-        .log-card { display: flex; flex-direction: column; height: calc(100vh - 108px); }
-        .log-toolbar { display: flex; gap: 8px; margin-bottom: 10px; }
-        .log-toolbar button {
-            background: #1e2535; border: none; border-radius: 6px;
-            color: #aab; padding: 5px 12px; font-size: 0.78rem; cursor: pointer;
-        }
-        .log-toolbar button:hover { background: #2a3347; }
-        #logBox {
-            flex: 1;
-            background: #0a0d14;
-            border: 1px solid #1e2535;
-            border-radius: 8px;
-            padding: 14px;
-            overflow-y: auto;
-            font-family: 'Courier New', monospace;
-            font-size: 0.8rem;
-            line-height: 1.75;
-        }
-        .log-line { color: #ccc; }
-        .log-line.success { color: #00c896; }
-        .log-line.error { color: #e74c3c; }
-        .log-line.info { color: #3b9eff; }
-        .log-line.warn { color: #f39c12; }
-    </style>
+/* ── QR Modal ── */
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:1000;display:none;justify-content:center;align-items:center}
+.modal.open{display:flex}
+.modal-box{background:var(--surface);border:1px solid var(--border);border-radius:18px;padding:30px;text-align:center;max-width:380px;width:90%}
+.modal-box h3{font-size:1rem;margin-bottom:6px}
+.modal-box p{font-size:.8rem;color:var(--muted);margin-bottom:20px}
+#qrImg{width:220px;height:220px;border-radius:12px;background:#fff;display:flex;align-items:center;justify-content:center;margin:0 auto 16px}
+.pairing-code{font-size:2rem;font-weight:900;letter-spacing:8px;color:var(--green);background:var(--bg);border-radius:10px;padding:16px;margin:10px 0}
+
+/* ── Log ── */
+.log-wrap{display:flex;flex-direction:column;height:calc(100vh - 100px)}
+.log-toolbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.log-actions{display:flex;gap:6px}
+.log-btn{padding:5px 12px;background:var(--border);border:none;border-radius:6px;color:var(--muted);font-size:.75rem;cursor:pointer}
+.log-btn:hover{color:var(--text)}
+#logBox{flex:1;background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:14px;overflow-y:auto;font-family:'Courier New',monospace;font-size:.78rem;line-height:1.8}
+.ll{color:#667}
+.ll.s{color:var(--green)}
+.ll.e{color:var(--red)}
+.ll.i{color:var(--blue)}
+.ll.w{color:var(--yellow)}
+
+/* ── Historico table ── */
+.htable{width:100%;border-collapse:collapse;font-size:.8rem}
+.htable th{font-size:.68rem;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);padding:8px 10px;text-align:left;border-bottom:1px solid var(--border)}
+.htable td{padding:9px 10px;border-bottom:1px solid rgba(26,37,64,.5)}
+.htable tr:last-child td{border:none}
+.htable tr:hover td{background:rgba(26,37,64,.3)}
+
+@media(max-width:900px){.main{grid-template-columns:1fr}.log-wrap{height:400px}}
+</style>
 </head>
 <body>
 
+<!-- Header -->
 <header>
-    <div class="header-left">
-        <h1>CH Logic</h1>
-        <span class="badge">SNIPER v4.0</span>
+  <div style="display:flex;align-items:center">
+    <span class="logo">CH LOGIC</span>
+    <span class="badge">SNIPER v4</span>
+  </div>
+  <div class="header-right">
+    <div class="wa-chip">
+      <div class="wa-dot" id="waDot"></div>
+      <span id="waLabel">Desconectado</span>
     </div>
-    <div class="header-right">
-        <div class="user-info">Logado como: <strong id="headerUsername">...</strong></div>
-        <button class="btn-logout" onclick="logout()">Sair</button>
-    </div>
+    <div class="user-chip">Olá, <strong id="hUser">...</strong></div>
+    <button class="btn-sm" onclick="logout()">Sair</button>
+  </div>
 </header>
 
-<div class="container">
+<!-- Main -->
+<div class="main">
 
-    <!-- COLUNA ESQUERDA -->
-    <div>
-        <div class="card">
-            <h2>⚙️ Configurações</h2>
-
-            <div class="form-group">
-                <label>URL do Painel Sigma</label>
-                <input type="text" id="painelUrl" placeholder="https://seupainelsigma.com" />
-            </div>
-            <button class="btn btn-primary" onclick="salvarConfig()">💾 Salvar e Abrir Sigma</button>
-
-            <hr class="divider">
-
-            <p class="section-label">⏰ Agendamento Automático</p>
-            <div class="form-group">
-                <label>Horário diário de cobrança</label>
-                <input type="time" id="horarioCobranca" value="08:00" />
-            </div>
-            <button class="btn btn-primary" onclick="salvarHorario()">⏰ Salvar Horário</button>
-            <div class="info-box" id="horarioInfo">Carregando...</div>
-
-            <hr class="divider">
-
-            <button class="btn btn-warning" onclick="rodarAgora()">▶️ Rodar Varredura Agora</button>
-
-            <hr class="divider">
-
-            <p class="section-label">📱 WhatsApp</p>
-            <div id="whatsappStatus">
-                <span class="status-badge disconnected"><div class="dot"></div> Desconectado</span>
-            </div>
-            <button class="btn btn-secondary" style="margin-top:12px" onclick="conectarWhatsApp()">
-                📱 Conectar WhatsApp
-            </button>
-        </div>
+  <!-- ── Coluna Esquerda ── -->
+  <div>
+    <!-- Tabs -->
+    <div class="tabs">
+      <button class="tab active" onclick="showTab('sigma',this)">Sigma</button>
+      <button class="tab" onclick="showTab('whatsapp',this)">WhatsApp</button>
+      <button class="tab" onclick="showTab('varredura',this)">Varredura</button>
+      <button class="tab" onclick="showTab('historico',this)">Histórico</button>
     </div>
 
-    <!-- LOG -->
-    <div class="card log-card">
-        <h2>📋 Logs do Sistema</h2>
-        <div class="log-toolbar">
-            <button onclick="limparLog()">🗑️ Limpar</button>
-            <button onclick="exportarLog()">💾 Exportar</button>
+    <!-- TAB: SIGMA -->
+    <div id="tab-sigma" class="tab-content active">
+      <div class="card">
+        <div class="card-title">🌐 Configuração do Sigma</div>
+        <div class="fg">
+          <label>URL do Painel</label>
+          <input type="url" id="sigmaUrl" placeholder="https://seu-sigma.com"/>
         </div>
-        <div id="logBox">
-            <div class="log-line info">> Aguardando comandos...</div>
+        <div class="fg">
+          <label>Usuário / E-mail</label>
+          <input type="text" id="sigmaUser" placeholder="admin@sigma.com"/>
         </div>
+        <div class="fg">
+          <label>Senha</label>
+          <input type="password" id="sigmaPass" placeholder="••••••••"/>
+        </div>
+        <button class="btn btn-primary btn-full" onclick="salvarSigma()">💾 Salvar Configurações</button>
+        <button class="btn btn-blue btn-full" id="btnAuth" onclick="autenticarSigma()">🔐 Autenticar Automaticamente</button>
+        <button class="btn btn-ghost btn-full" id="btnSync" onclick="sincronizarClientes()">🔄 Sincronizar Clientes</button>
+        <div class="info-row" id="cacheInfo">Carregando cache...</div>
+      </div>
     </div>
 
+    <!-- TAB: WHATSAPP -->
+    <div id="tab-whatsapp" class="tab-content">
+      <div class="card">
+        <div class="card-title">📱 Conexão WhatsApp</div>
+
+        <div style="text-align:center;margin-bottom:16px">
+          <div class="status-tag tag-err" id="waStatusTag">● Desconectado</div>
+        </div>
+
+        <div class="tabs" style="margin-bottom:12px">
+          <button class="tab active" id="tabQr" onclick="selectWaMethod('qr',this)">QR Code</button>
+          <button class="tab" id="tabPairing" onclick="selectWaMethod('pairing',this)">Código</button>
+        </div>
+
+        <div id="waQrSection">
+          <p style="font-size:.78rem;color:var(--muted);margin-bottom:10px">Clique em Conectar e escaneie o QR pelo WhatsApp → Aparelhos conectados.</p>
+          <button class="btn btn-primary btn-full" id="btnConectar" onclick="conectarWa()">📱 Conectar via QR Code</button>
+        </div>
+
+        <div id="waPairingSection" style="display:none">
+          <div class="fg">
+            <label>Número com DDI (ex: 5511999999999)</label>
+            <input type="tel" id="waPhone" placeholder="5511999999999"/>
+          </div>
+          <button class="btn btn-primary btn-full" id="btnConectarCode" onclick="conectarWaCode()">🔑 Gerar Código de Pareamento</button>
+        </div>
+
+        <button class="btn btn-danger btn-full" id="btnDesconectar" onclick="desconectarWa()" style="display:none">🔌 Desconectar</button>
+
+        <hr>
+        <p style="font-size:.72rem;color:var(--muted)">
+          <strong style="color:var(--yellow)">Dica:</strong> Use <em>Código de Pareamento</em> para conectar sem precisar escanear o QR — basta digitar o código no WhatsApp → Aparelhos conectados → Vincular com número de telefone.
+        </p>
+      </div>
+    </div>
+
+    <!-- TAB: VARREDURA -->
+    <div id="tab-varredura" class="tab-content">
+      <div class="card">
+        <div class="card-title">⏰ Agendamento</div>
+        <div class="fg">
+          <label>Horário diário de cobrança</label>
+          <input type="time" id="horario" value="08:00"/>
+        </div>
+        <button class="btn btn-primary btn-full" onclick="salvarHorario()">⏰ Salvar Horário</button>
+        <div class="info-row" id="horarioInfo">—</div>
+      </div>
+
+      <div class="card" style="margin-top:14px">
+        <div class="card-title">▶️ Executar Agora</div>
+        <button class="btn btn-warn btn-full" onclick="rodarAgora(false)">🔄 Varrer + Atualizar Clientes</button>
+        <button class="btn btn-ghost btn-full" onclick="rodarAgora(true)">💾 Varrer com Cache Atual</button>
+        <div class="info-row" style="font-size:.75rem;color:var(--muted)">
+          A régua detecta clientes nos dias: <strong style="color:var(--green)">-7, -5, -3, -1, 0, +1, +2, +3, +5, +7</strong> em relação ao vencimento.
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB: HISTÓRICO -->
+    <div id="tab-historico" class="tab-content">
+      <div class="card">
+        <div class="card-title">📋 Mensagens Enviadas</div>
+        <div style="overflow-x:auto">
+          <table class="htable" id="histTable">
+            <thead>
+              <tr><th>Cliente</th><th>Número</th><th>Dia</th><th>Enviado</th></tr>
+            </thead>
+            <tbody id="histBody">
+              <tr><td colspan="4" style="color:var(--muted);text-align:center;padding:20px">Carregando...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Log ── -->
+  <div class="card log-wrap">
+    <div class="log-toolbar">
+      <div class="card-title" style="margin:0">📋 Logs em Tempo Real</div>
+      <div class="log-actions">
+        <button class="log-btn" onclick="limparLog()">🗑 Limpar</button>
+        <button class="log-btn" onclick="exportarLog()">💾 Exportar</button>
+      </div>
+    </div>
+    <div id="logBox">
+      <div class="ll i">> Sistema iniciado. Aguardando ações...</div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal QR -->
+<div class="modal" id="modalQr">
+  <div class="modal-box">
+    <h3>📱 Escanear QR Code</h3>
+    <p>Abra o WhatsApp → Aparelhos conectados → Conectar aparelho</p>
+    <div id="qrImg"><span style="color:#999;font-size:.8rem">Aguardando QR...</span></div>
+    <div class="pairing-code" id="pairingCode" style="display:none">- - - -</div>
+    <button class="btn btn-ghost" onclick="fecharModal()" style="width:100%;margin-top:10px">Fechar</button>
+  </div>
 </div>
 
 <script>
-    const socket = io();
-    let userId = null;
+const socket = io();
+let waMethod = 'qr';
 
-    // ── Verifica sessão antes de qualquer coisa
-    (async () => {
-        try {
-            const r = await fetch('/api/me');
-            if (!r.ok) return window.location.href = '/login.html';
-            const user = await r.json();
-            userId = user.id;
-            document.getElementById('headerUsername').textContent = user.username;
-            if (user.painel_url) document.getElementById('painelUrl').value = user.painel_url;
-            if (user.horario_cobranca) {
-                document.getElementById('horarioCobranca').value = user.horario_cobranca;
-                atualizarInfoHorario(user.horario_cobranca);
-            }
-            // Conecta ao room correto após ter o userId
-            socket.emit('join_room', userId);
-        } catch(e) {
-            window.location.href = '/login.html';
-        }
-    })();
-
-    // ── Recebe logs do servidor (isolado por room)
-    socket.on('novo_log', (msg) => {
-        let cls = 'log-line';
-        if (msg.includes('✅') || msg.includes('🏆') || msg.includes('📦')) cls += ' success';
-        else if (msg.includes('❌')) cls += ' error';
-        else if (msg.includes('⏰') || msg.includes('📡') || msg.includes('▶️')) cls += ' info';
-        else if (msg.includes('⚠️')) cls += ' warn';
-        addLog(msg, cls);
-    });
-
-    // ── Abre aba do Sigma
-    socket.on('open_sigma_tab', (data) => {
-        addLog('🕒 Abrindo painel Sigma...', 'log-line info');
-        addLog('👉 Faça login e clique em Clientes para sincronizar.', 'log-line warn');
-        window.open(data.url, '_blank');
-    });
-
-    function atualizarInfoHorario(h) {
-        document.getElementById('horarioInfo').innerHTML =
-            `Varredura automática agendada para <strong>${h}</strong> todos os dias.`;
+// ── INIT ──────────────────────────────────────────────────────────────────
+(async()=>{
+  try{
+    const r = await fetch('/api/me');
+    if(!r.ok) return window.location.href='/login.html';
+    const u = await r.json();
+    document.getElementById('hUser').textContent = u.username;
+    if(u.sigma_url) document.getElementById('sigmaUrl').value = u.sigma_url;
+    if(u.sigma_user) document.getElementById('sigmaUser').value = u.sigma_user;
+    if(u.horario_cobranca){
+      document.getElementById('horario').value = u.horario_cobranca;
+      document.getElementById('horarioInfo').innerHTML = `Varredura agendada para <strong>${u.horario_cobranca}</strong> todos os dias.`;
     }
+    socket.emit('join', u.id);
+    carregarCache();
+    carregarHistorico();
+  }catch(e){ window.location.href='/login.html'; }
+})();
 
-    function salvarConfig() {
-        const url = document.getElementById('painelUrl').value.trim();
-        if (!url) return alert('Digite a URL do Sigma.');
-        addLog('💾 Salvando configurações...', 'log-line info');
-        socket.emit('save_config', { url });
-    }
+// ── SOCKET EVENTS ─────────────────────────────────────────────────────────
+socket.on('log', msg => addLog(msg));
 
-    async function salvarHorario() {
-        const horario = document.getElementById('horarioCobranca').value;
-        if (!horario) return alert('Selecione um horário.');
-        const r = await fetch('/api/set-horario', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ horario })
-        });
-        const d = await r.json();
-        if (d.success) atualizarInfoHorario(horario);
-    }
+socket.on('whatsapp_status', d => atualizarStatusWa(d));
 
-    async function rodarAgora() {
-        addLog('▶️ Iniciando varredura manual...', 'log-line info');
-        await fetch('/api/rodar-agora', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({})
-        });
-    }
+socket.on('whatsapp_qr', dataUrl => {
+  const img = document.getElementById('qrImg');
+  img.innerHTML = `<img src="${dataUrl}" style="width:210px;height:210px;border-radius:10px"/>`;
+  document.getElementById('pairingCode').style.display='none';
+  abrirModal();
+});
 
-    function conectarWhatsApp() {
-        addLog('📱 Módulo WhatsApp em breve...', 'log-line warn');
-    }
+socket.on('pairing_code', code => {
+  const el = document.getElementById('pairingCode');
+  el.textContent = code;
+  el.style.display = 'block';
+  document.getElementById('qrImg').innerHTML = '<span style="color:#999;font-size:.8rem">Usando código</span>';
+  abrirModal();
+});
 
-    async function logout() {
-        await fetch('/api/logout', { method: 'POST' });
-        window.location.href = '/login.html';
-    }
+// ── TABS ──────────────────────────────────────────────────────────────────
+function showTab(name, el){
+  document.querySelectorAll('.tab-content').forEach(t=>t.classList.remove('active'));
+  document.querySelectorAll('.tabs .tab').forEach(t=>t.classList.remove('active'));
+  document.getElementById('tab-'+name).classList.add('active');
+  el.classList.add('active');
+  if(name==='historico') carregarHistorico();
+}
 
-    function addLog(msg, cls = 'log-line') {
-        const box = document.getElementById('logBox');
-        const div = document.createElement('div');
-        div.className = cls;
-        div.textContent = '> ' + msg;
-        box.appendChild(div);
-        box.scrollTop = box.scrollHeight;
-    }
+// ── SIGMA ─────────────────────────────────────────────────────────────────
+async function salvarSigma(){
+  const body={
+    sigma_url:document.getElementById('sigmaUrl').value.trim(),
+    sigma_user:document.getElementById('sigmaUser').value.trim(),
+    sigma_pass:document.getElementById('sigmaPass').value,
+  };
+  if(!body.sigma_url||!body.sigma_user||!body.sigma_pass){alert('Preencha todos os campos do Sigma.');return;}
+  const r=await fetch('/api/config/sigma',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+  const d=await r.json();
+  if(r.ok) addLog('✅ Configurações do Sigma salvas.');
+  else addLog('❌ '+d.error);
+}
 
-    function limparLog() {
-        document.getElementById('logBox').innerHTML = '<div class="log-line info">> Log limpo.</div>';
-    }
+async function autenticarSigma(){
+  const btn=document.getElementById('btnAuth');
+  btn.disabled=true; btn.textContent='⏳ Autenticando...';
+  addLog('🔐 Iniciando autenticação automática no Sigma...');
+  try{
+    const r=await fetch('/api/sigma/autenticar',{method:'POST'});
+    const d=await r.json();
+    if(r.ok) addLog('✅ Autenticado com sucesso!');
+    else addLog('❌ '+d.error);
+  }catch(e){addLog('❌ Erro: '+e.message);}
+  btn.disabled=false; btn.textContent='🔐 Autenticar Automaticamente';
+}
 
-    function exportarLog() {
-        const linhas = [...document.querySelectorAll('#logBox div')].map(d => d.textContent).join('\n');
-        const blob = new Blob([linhas], { type: 'text/plain' });
-        const a = document.createElement('a');
-        a.href = URL.createObjectURL(blob);
-        a.download = `log-${new Date().toISOString().slice(0,10)}.txt`;
-        a.click();
+async function sincronizarClientes(){
+  const btn=document.getElementById('btnSync');
+  btn.disabled=true; btn.textContent='⏳ Sincronizando...';
+  addLog('🔄 Sincronizando clientes do Sigma...');
+  try{
+    const r=await fetch('/api/sigma/sincronizar',{method:'POST'});
+    const d=await r.json();
+    if(r.ok){ addLog(`📦 ${d.count} clientes sincronizados!`); carregarCache(); }
+    else addLog('❌ '+d.error);
+  }catch(e){addLog('❌ Erro: '+e.message);}
+  btn.disabled=false; btn.textContent='🔄 Sincronizar Clientes';
+}
+
+async function carregarCache(){
+  try{
+    const r=await fetch('/api/sigma/cache');
+    const d=await r.json();
+    const el=document.getElementById('cacheInfo');
+    if(d.total>0){
+      const dt=new Date(d.updated_at).toLocaleString('pt-BR');
+      el.innerHTML=`Cache: <strong>${d.total} clientes</strong> — atualizado em ${dt}`;
+    } else {
+      el.innerHTML='Nenhum cache. Sincronize os clientes do Sigma.';
     }
+  }catch(_){}
+}
+
+// ── WHATSAPP ──────────────────────────────────────────────────────────────
+function selectWaMethod(m, el){
+  waMethod=m;
+  document.querySelectorAll('[id^="tabQr"],[id^="tabPairing"]').forEach(t=>t.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('waQrSection').style.display=m==='qr'?'':'none';
+  document.getElementById('waPairingSection').style.display=m==='pairing'?'':'none';
+}
+
+async function conectarWa(){
+  addLog('📱 Conectando WhatsApp via QR Code...');
+  await fetch('/api/whatsapp/conectar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})});
+}
+
+async function conectarWaCode(){
+  const phone=document.getElementById('waPhone').value.replace(/\D/g,'');
+  if(phone.length<10){alert('Informe um número válido com DDI.');return;}
+  addLog(`📱 Gerando código para +${phone}...`);
+  await fetch('/api/whatsapp/conectar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({phone})});
+}
+
+async function desconectarWa(){
+  if(!confirm('Desconectar WhatsApp?'))return;
+  await fetch('/api/whatsapp/desconectar',{method:'POST'});
+}
+
+function atualizarStatusWa(d){
+  const dot=document.getElementById('waDot');
+  const label=document.getElementById('waLabel');
+  const tag=document.getElementById('waStatusTag');
+  const btnC=document.getElementById('btnConectar');
+  const btnCC=document.getElementById('btnConectarCode');
+  const btnD=document.getElementById('btnDesconectar');
+
+  if(d.connected){
+    dot.classList.add('on');
+    label.textContent='Conectado'+(d.phone?` +${d.phone}`:'');
+    tag.className='status-tag tag-ok';
+    tag.textContent='● Conectado'+(d.phone?` (+${d.phone})`:'');
+    btnC.style.display='none'; btnCC.style.display='none';
+    btnD.style.display='flex';
+    fecharModal();
+  } else {
+    dot.classList.remove('on');
+    label.textContent='Desconectado';
+    tag.className='status-tag tag-err';
+    tag.textContent='● Desconectado';
+    btnC.style.display='flex'; btnCC.style.display='flex';
+    btnD.style.display='none';
+  }
+}
+
+// ── VARREDURA ─────────────────────────────────────────────────────────────
+async function salvarHorario(){
+  const h=document.getElementById('horario').value;
+  const r=await fetch('/api/config/horario',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({horario:h})});
+  const d=await r.json();
+  if(r.ok){
+    document.getElementById('horarioInfo').innerHTML=`Varredura agendada para <strong>${h}</strong> todos os dias.`;
+    addLog(`⏰ Horário definido: ${h}`);
+  } else addLog('❌ '+d.error);
+}
+
+async function rodarAgora(cache){
+  addLog(cache?'▶️ Rodando com cache...':'▶️ Iniciando varredura completa...');
+  await fetch('/api/varredura/rodar',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({usar_cache:cache})});
+}
+
+// ── HISTÓRICO ─────────────────────────────────────────────────────────────
+async function carregarHistorico(){
+  try{
+    const r=await fetch('/api/historico');
+    const rows=await r.json();
+    const tb=document.getElementById('histBody');
+    if(!rows.length){
+      tb.innerHTML='<tr><td colspan="4" style="color:var(--muted);text-align:center;padding:20px">Nenhuma mensagem enviada ainda.</td></tr>';
+      return;
+    }
+    tb.innerHTML=rows.map(m=>{
+      const icon=m.diff_days<0?'🔴':m.diff_days===0?'🟡':'🟢';
+      const label=m.diff_days===0?'Hoje':m.diff_days>0?`+${m.diff_days}d`:`${m.diff_days}d`;
+      const dt=new Date(m.enviado_em).toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+      return `<tr><td>${m.nome||'—'}</td><td style="font-family:monospace">${m.numero}</td><td>${icon} ${label}</td><td style="color:var(--muted)">${dt}</td></tr>`;
+    }).join('');
+  }catch(_){}
+}
+
+// ── LOG ───────────────────────────────────────────────────────────────────
+function addLog(msg,cls='ll'){
+  const box=document.getElementById('logBox');
+  const div=document.createElement('div');
+  div.className=cls;
+  if(msg.includes('✅')||msg.includes('🏆')||msg.includes('📦')) div.classList.add('s');
+  else if(msg.includes('❌')) div.classList.add('e');
+  else if(msg.includes('📱')||msg.includes('⏰')||msg.includes('▶️')||msg.includes('🔐')||msg.includes('🔄')) div.classList.add('i');
+  else if(msg.includes('⚠️')||msg.includes('🟡')) div.classList.add('w');
+  div.textContent='> '+msg;
+  box.appendChild(div);
+  box.scrollTop=box.scrollHeight;
+}
+
+function limparLog(){document.getElementById('logBox').innerHTML='<div class="ll i">> Log limpo.</div>';}
+function exportarLog(){
+  const txt=[...document.querySelectorAll('#logBox div')].map(d=>d.textContent).join('\n');
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([txt],{type:'text/plain'}));
+  a.download=`ch-logic-log-${new Date().toISOString().slice(0,10)}.txt`;
+  a.click();
+}
+
+// ── MODAL ─────────────────────────────────────────────────────────────────
+function abrirModal(){document.getElementById('modalQr').classList.add('open');}
+function fecharModal(){document.getElementById('modalQr').classList.remove('open');}
+
+// ── AUTH ──────────────────────────────────────────────────────────────────
+async function logout(){
+  await fetch('/api/logout',{method:'POST'});
+  window.location.href='/login.html';
+}
 </script>
 </body>
 </html>

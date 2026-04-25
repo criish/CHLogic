@@ -1,21 +1,26 @@
 {
+  "name": "chlogic-sniper",
+  "version": "4.0.0",
+  "description": "CH Logic IPTV Sniper - Sistema de Cobrança Automática",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js"
+  },
   "dependencies": {
+    "@hapi/boom": "^9.1.4",
     "@whiskeysockets/baileys": "^7.0.0-rc.9",
-    "axios": "^1.15.2",
-    "body-parser": "^2.2.2",
-    "express": "^5.2.1",
-    "express-session": "^1.19.0",
-    "libsignal-node": "^2.0.1",
-    "node-cron": "^4.2.1",
-    "path": "^0.12.7",
-    "pino": "^10.3.1",
-    "puppeteer": "^24.42.0",
-    "puppeteer-extra": "^3.3.6",
-    "puppeteer-extra-plugin-stealth": "^2.11.2",
-    "qrcode": "^1.5.4",
-    "socket.io": "^4.8.3",
+    "axios": "^1.7.2",
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "express-session": "^1.18.0",
+    "node-cron": "^3.0.3",
+    "pino": "^9.0.0",
+    "puppeteer": "^22.0.0",
+    "qrcode": "^1.5.3",
+    "sharp": "^0.33.0",
+    "socket.io": "^4.7.5",
     "sqlite": "^5.1.1",
-    "sqlite3": "^6.0.1",
-    "whatsapp-web.js": "^1.34.6"
+    "sqlite3": "^5.1.7"
   }
 }
