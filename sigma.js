@@ -7,84 +7,98 @@ function log(emitLog, userId, msg) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// CAPTURA AUTOMÁTICA (O seu script Python convertido para Node.js)
+// CAPTURA AUTOMÁTICA DE TOKEN E ENDPOINT (SNIFFER)
 // ─────────────────────────────────────────────────────────────────────────────
 async function capturarToken(userId, emitLog) {
   const db = await getDb();
   const user = await db.get('SELECT * FROM users WHERE id = ?', [userId]);
 
   if (!user?.sigma_url || !user?.sigma_user || !user?.sigma_pass) {
-    log(emitLog, userId, '❌ Configure URL, Usuário e Senha antes de continuar.');
+    log(emitLog, userId, '❌ Configure URL, Usuário e Senha no painel.');
     return null;
   }
 
-  log(emitLog, userId, `🚀 Abrindo navegador para: ${user.sigma_url}`);
+  log(emitLog, userId, `🚀 Abrindo navegador na Oracle para: ${user.sigma_url}`);
 
   let browser;
   try {
-    // Abre o navegador (headless: false se quiser ver o bot trabalhando)
+    // Configurações específicas para rodar em VPS Linux (Oracle)
     browser = await puppeteer.launch({ 
       headless: 'new', 
-      args: ['--no-sandbox', '--disable-setuid-sandbox'] 
+      args: [
+        '--no-sandbox', 
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--window-size=1366,768'
+      ] 
     });
     
     const page = await browser.newPage();
+    await page.setViewport({ width: 1366, height: 768 });
+
     let capturedToken = null;
     let detectedEndpoint = null;
 
-    // INTERCEPTAÇÃO DE REDE (Igual ao script Python)
+    // INTERCEPTAÇÃO DE REDE
     await page.setRequestInterception(true);
     page.on('request', request => {
       const url = request.url();
       const headers = request.headers();
 
-      // Ignora URLs de log (Sentry/Envelope) para não pegar lixo
+      // Ignora Sentry e telemetria para não capturar URLs erradas
       if (url.includes('smart-ti.com') || url.includes('sentry')) {
         return request.continue();
       }
 
-      // 1. Pega o Token Bearer
+      // 1. Captura o Token Bearer
       if (headers['authorization']?.startsWith('Bearer ')) {
         capturedToken = headers['authorization'].replace('Bearer ', '').trim();
       }
 
-      // 2. Pega o Endpoint de clientes/agendamentos
+      // 2. Detecta o endpoint de clientes/usuários
       const termosChave = ['customer', 'client', 'agendamento', 'user', 'member'];
       const ehApi = url.includes('/api/');
       const temTermo = termosChave.some(t => url.toLowerCase().includes(t));
 
       if (ehApi && temTermo && !url.includes('login') && !url.includes('auth')) {
-        detectedEndpoint = url.split('?')[0]; // Salva a rota limpa
+        detectedEndpoint = url.split('?')[0]; 
       }
 
       request.continue();
     });
 
-    // Passo 1: Ir para a URL que o cliente colou
+    // Passo 1: Acessar a URL inicial
     await page.goto(user.sigma_url, { waitUntil: 'networkidle2', timeout: 60000 });
 
-    // Passo 2: Fazer Login automático
-    log(emitLog, userId, '📝 Tentando login automático...');
-    const userField = await page.$('input[type="text"], input[name="username"], input[name="email"]');
-    if (userField) {
-      await page.type('input[type="text"], input[name="username"], input[name="email"]', user.sigma_user);
-      await page.type('input[type="password"]', user.sigma_pass);
+    // Passo 2: Login com Espera e Digitação Humana (Evita bloqueios em VPS)
+    const userSelector = 'input[type="text"], input[name="username"], input[name="email"]';
+    
+    try {
+      log(emitLog, userId, '⏳ Aguardando campos de login...');
+      await page.waitForSelector(userSelector, { timeout: 15000 });
+
+      log(emitLog, userId, '📝 Preenchendo credenciais...');
+      await page.type(userSelector, user.sigma_user, { delay: 60 });
+      await page.type('input[type="password"]', user.sigma_pass, { delay: 60 });
+      
       await page.keyboard.press('Enter');
-      await page.waitForNavigation({ waitUntil: 'networkidle2' }).catch(() => {});
+      
+      log(emitLog, userId, '⏳ Aguardando redirecionamento do painel...');
+      await page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 20000 }).catch(() => {});
+    } catch (e) {
+      log(emitLog, userId, '⚠️ Falha ao localizar campos ou tempo esgotado.');
     }
 
-    // Passo 3: Forçar navegação para a aba de clientes (Essencial para o Sigma/UFO)
-    log(emitLog, userId, '📂 Navegando para a aba de Clientes para capturar API...');
+    // Passo 3: Forçar navegação para Clientes (Indispensável para UFO PLAY)
+    log(emitLog, userId, '📂 Acessando aba de Clientes para forçar disparo da API...');
     const baseUrl = user.sigma_url.replace(/\/$/, '').split('#')[0];
-    
-    // Tenta ir para as rotas comuns de clientes no Sigma/Petflow
     await page.goto(`${baseUrl}/#/customers`, { waitUntil: 'networkidle2' }).catch(() => {});
     
-    // Espera os dados carregarem para a API disparar
-    await new Promise(r => setTimeout(r, 10000));
+    // Espera a API ser chamada e os dados carregarem na Oracle
+    await new Promise(r => setTimeout(r, 15000));
 
     if (capturedToken && detectedEndpoint) {
-      log(emitLog, userId, '✅ Sucesso! Rota e Token capturados.');
+      log(emitLog, userId, '✅ Sucesso! Rota e Token capturados e salvos.');
       
       await db.run(
         `UPDATE users SET 
@@ -99,38 +113,45 @@ async function capturarToken(userId, emitLog) {
       return true;
     }
 
-    log(emitLog, userId, '⚠️ Não foi possível capturar todos os dados automaticamente.');
+    log(emitLog, userId, '⚠️ Captura incompleta. Tente novamente ou verifique as credenciais.');
     await browser.close();
     return false;
 
   } catch (err) {
     if (browser) await browser.close();
-    log(emitLog, userId, `❌ Erro no processo: ${err.message}`);
+    log(emitLog, userId, `❌ Erro fatal no bot: ${err.message}`);
     return null;
   }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SINCRONIZAÇÃO (Usa os dados capturados para preencher o banco)
+// BUSCA E SINCRONIZAÇÃO DE CLIENTES (USANDO O CACHE)
 // ─────────────────────────────────────────────────────────────────────────────
 async function buscarClientes(userId, emitLog) {
   const db = await getDb();
   const user = await db.get('SELECT * FROM users WHERE id = ?', [userId]);
 
+  // Se não houver rota ou token, dispara a captura automática primeiro
   if (!user.sigma_url_api || !user.sigma_token) {
-    log(emitLog, userId, '🔄 Rota não encontrada. Iniciando captura...');
+    log(emitLog, userId, '🔄 Dados de API ausentes. Iniciando captura automática...');
     const ok = await capturarToken(userId, emitLog);
     if (!ok) return null;
+    // Recarrega o usuário após a captura para pegar o novo token/rota
     return buscarClientes(userId, emitLog);
   }
 
   try {
-    log(emitLog, userId, '📡 Baixando dados da API...');
+    log(emitLog, userId, '📡 Sincronizando dados com o servidor Sigma...');
     const resp = await axios.get(user.sigma_url_api, {
-      headers: { 'Authorization': `Bearer ${user.sigma_token}` },
-      params: { limit: 1000, per_page: 1000 }
+      headers: { 
+        'Authorization': `Bearer ${user.sigma_token}`,
+        'Accept': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      },
+      params: { limit: 2000, per_page: 2000 } // Tenta buscar o máximo de clientes
     });
 
+    // Normaliza a resposta (Sigma costuma usar .data ou .data.data)
     const raw = resp.data.data || resp.data.customers || resp.data.content || resp.data;
     const lista = Array.isArray(raw) ? raw : (raw.data || []);
 
@@ -140,6 +161,7 @@ async function buscarClientes(userId, emitLog) {
       expiration: c.expiration_date || c.expiry || c.vencimento || c.expires_at || c.data_vencimento
     }));
 
+    // Atualiza o cache local para a régua de cobrança
     await db.run(
       `INSERT INTO clientes_cache (user_id, clientes, updated_at) 
        VALUES (?, ?, ?) 
@@ -147,12 +169,14 @@ async function buscarClientes(userId, emitLog) {
       [userId, JSON.stringify(clientes), new Date().toISOString()]
     );
 
-    log(emitLog, userId, `🏆 ${clientes.length} clientes prontos para a régua.`);
+    log(emitLog, userId, `🏆 ${clientes.length} clientes sincronizados com sucesso.`);
     return clientes;
 
   } catch (err) {
     log(emitLog, userId, `❌ Erro na sincronização: ${err.message}`);
+    // Se o erro for 401 (Não autorizado), limpa o token para forçar nova captura na próxima vez
     if (err.response?.status === 401) {
+      log(emitLog, userId, '🔐 Token inválido ou expirado. Será renovado no próximo ciclo.');
       await db.run('UPDATE users SET sigma_token = NULL WHERE id = ?', [userId]);
     }
     return null;
