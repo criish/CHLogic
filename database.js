@@ -27,7 +27,7 @@ async function getDb() {
       sigma_pass       TEXT,
       sigma_token      TEXT,
       sigma_updated_at TEXT,
-      sigma_url_api    TEXT,
+      sigma_api_base   TEXT,
       ativo            INTEGER DEFAULT 1,
       is_admin         INTEGER DEFAULT 0
     );
@@ -49,17 +49,12 @@ async function getDb() {
     );
   `);
 
-  // --- LÓGICA DE MIGRAÇÃO (FORÇA A CRIAÇÃO DA COLUNA SE NÃO EXISTIR) ---
-  try {
-    const columns = await db.all("PRAGMA table_info(users)");
-    const hasColumn = columns.some(col => col.name === 'sigma_url_api');
-    
-    if (!hasColumn) {
-      await db.run("ALTER TABLE users ADD COLUMN sigma_url_api TEXT");
-      console.log('✅ Coluna sigma_url_api adicionada com sucesso.');
-    }
-  } catch (e) {
-    console.log('ℹ️ Coluna sigma_url_api já existe ou erro na migração.');
+  // Migration segura: adiciona colunas novas em bancos já existentes
+  const colunas = await db.all(`PRAGMA table_info(users)`);
+  const nomes = colunas.map(c => c.name);
+  if (!nomes.includes('sigma_api_base')) {
+    await db.exec(`ALTER TABLE users ADD COLUMN sigma_api_base TEXT`);
+    console.log('✅ Migration: coluna sigma_api_base adicionada.');
   }
 
   // Garante admin padrão
