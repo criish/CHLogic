@@ -126,9 +126,9 @@ async function varreduraCompleta(userId, emitLog, usarCache = false) {
 // Scheduler por usuário
 // ─────────────────────────────────────────────────────────────────────────────
 function agendarJob(userId, horario, emitLog) {
-  // Cancela job anterior
+  // Cancela job anterior (node-cron v4 usa .stop() em vez de .destroy())
   if (jobs.has(userId)) {
-    jobs.get(userId).destroy();
+    try { jobs.get(userId).stop(); } catch (_) {}
     jobs.delete(userId);
   }
 
@@ -148,7 +148,7 @@ function agendarJob(userId, horario, emitLog) {
 
 function cancelarJob(userId) {
   if (jobs.has(userId)) {
-    jobs.get(userId).destroy();
+    try { jobs.get(userId).stop(); } catch (_) {}
     jobs.delete(userId);
   }
 }
