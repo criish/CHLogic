@@ -46,7 +46,7 @@ app.set('io', io);
 app.use('/api', routes);
 
 app.get(/^(?!\/api).*/, (req, res) => {
-  res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 // ── Socket.IO ─────────────────────────────────────────────────────────────────
