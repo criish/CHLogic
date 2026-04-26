@@ -1,15 +1,9 @@
 // src/whatsapp.js
-// Gerencia sessões Baileys por usuário (multi-tenant)
-// Suporta QR Code e Pairing Code (sem escanear)
-
 const {
   default: makeWASocket,
   useMultiFileAuthState,
   DisconnectReason,
   fetchLatestBaileysVersion,
-  makeInMemoryStore,
-  jidNormalizedUser,
-  isJidUser,
 } = require('@whiskeysockets/baileys');
 const { Boom } = require('@hapi/boom');
 const pino = require('pino');
@@ -20,25 +14,30 @@ const qrcode = require('qrcode');
 const AUTH_DIR = path.join(__dirname, '..', 'auth_sessions');
 if (!fs.existsSync(AUTH_DIR)) fs.mkdirSync(AUTH_DIR, { recursive: true });
 
-// Mapa de sessões ativas: userId -> socket
+// userId -> socket Baileys
 const sessions = new Map();
-// Mapa de status: userId -> { connected, phoneNumber }
+// userId -> { connected, phone }
 const statusMap = new Map();
 
 const logger = pino({ level: 'silent' });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Conectar WhatsApp
-// ─────────────────────────────────────────────────────────────────────────────
+// ── Conectar / Reconectar ─────────────────────────────────────────────────────
 async function conectarWhatsApp(userId, io, emitLog, phoneNumber = null) {
-  // Encerra sessão anterior se existir
-  await encerrarSessao(userId, false);
+  // Se já tem sessão ativa, encerra sem apagar creds
+  await _fecharSocket(userId);
 
   const authPath = path.join(AUTH_DIR, `user_${userId}`);
   const { state, saveCreds } = await useMultiFileAuthState(authPath);
   const { version } = await fetchLatestBaileysVersion();
 
-  emitLog(userId, `📱 Iniciando conexão WhatsApp (Baileys v${version.join('.')})...`);
+  // Só loga "iniciando" quando NÃO é reconexão silenciosa de boot
+  // (boot: phoneNumber === null E já tem creds salvas)
+  const temCreds = state?.creds?.registered === true;
+  if (!temCreds || phoneNumber) {
+    emitLog(userId, `📱 Iniciando conexão WhatsApp (Baileys v${version.join('.')})...`);
+  } else {
+    console.log(`📱 [boot] Reconectando sessão salva do usuário ${userId}...`);
+  }
 
   const sock = makeWASocket({
     version,
@@ -46,28 +45,24 @@ async function conectarWhatsApp(userId, io, emitLog, phoneNumber = null) {
     logger,
     printQRInTerminal: false,
     browser: ['CH Logic', 'Chrome', '124.0.0'],
-    connectTimeoutMs: 30000,
+    connectTimeoutMs: 60000,
     defaultQueryTimeoutMs: 20000,
     keepAliveIntervalMs: 25000,
     retryRequestDelayMs: 500,
     maxMsgRetryCount: 3,
-    // Não baixa histórico — mais leve
     syncFullHistory: false,
     shouldSyncHistoryMessage: () => false,
-    // Ignora mensagens recebidas — só envia
     getMessage: async () => undefined,
   });
 
   sessions.set(userId, sock);
-
-  // ── Eventos ──────────────────────────────────────────────────────────────
 
   sock.ev.on('creds.update', saveCreds);
 
   sock.ev.on('connection.update', async (update) => {
     const { connection, lastDisconnect, qr } = update;
 
-    // QR Code
+    // QR Code — só aparece quando não tem sessão salva
     if (qr) {
       try {
         const qrDataUrl = await qrcode.toDataURL(qr);
@@ -77,36 +72,46 @@ async function conectarWhatsApp(userId, io, emitLog, phoneNumber = null) {
     }
 
     if (connection === 'open') {
-      const phone = sock.user?.id?.split(':')[0] || 'Desconhecido';
+      const phone = sock.user?.id?.split(':')[0] || '';
       statusMap.set(userId, { connected: true, phone });
       io.to(`room_${userId}`).emit('whatsapp_status', { connected: true, phone });
       emitLog(userId, `✅ WhatsApp conectado! Número: +${phone}`);
     }
 
     if (connection === 'close') {
-      const statusCode =
-        lastDisconnect?.error instanceof Boom
-          ? lastDisconnect.error.output?.statusCode
-          : null;
+      const err = lastDisconnect?.error;
+      const statusCode = err instanceof Boom ? err.output?.statusCode : null;
 
       statusMap.set(userId, { connected: false });
       io.to(`room_${userId}`).emit('whatsapp_status', { connected: false });
       sessions.delete(userId);
 
-      if (statusCode === DisconnectReason.loggedOut || statusCode === DisconnectReason.badSession) {
-        emitLog(userId, '🔌 WhatsApp deslogado. Limpando sessão...');
+      const deveApagar =
+        statusCode === DisconnectReason.loggedOut ||
+        statusCode === DisconnectReason.badSession ||
+        statusCode === 401;
+
+      if (deveApagar) {
+        emitLog(userId, '🔌 WhatsApp deslogado. Sessão removida — conecte novamente.');
         limparSessao(userId);
-      } else {
-        emitLog(userId, '⚠️ Conexão encerrada. Reconectando em 8s...');
-        setTimeout(() => conectarWhatsApp(userId, io, emitLog, null), 8000);
+        return; // não tenta reconectar: sessão inválida
       }
+
+      // Qualquer outro erro: tenta reconectar em 10s (sem pedir QR/código)
+      emitLog(userId, '⚠️ Conexão encerrada. Reconectando em 10s...');
+      setTimeout(() => {
+        // Confirma que a sessão não foi limpa entre o close e agora
+        const authPath = path.join(AUTH_DIR, `user_${userId}`);
+        if (fs.existsSync(authPath)) {
+          conectarWhatsApp(userId, io, emitLog, null);
+        }
+      }, 10000);
     }
   });
 
-  // Código de pareamento por número (sem QR)
+  // Pairing code (conectar por número, sem QR)
   if (phoneNumber) {
     const cleanPhone = String(phoneNumber).replace(/\D/g, '');
-    // Aguarda socket estar pronto antes de solicitar o código
     setTimeout(async () => {
       try {
         if (!sock.authState.creds.registered) {
@@ -125,15 +130,8 @@ async function conectarWhatsApp(userId, io, emitLog, phoneNumber = null) {
   return sock;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Desconectar
-// ─────────────────────────────────────────────────────────────────────────────
+// ── Desconectar manualmente (limpa creds) ─────────────────────────────────────
 async function desconectarWhatsApp(userId, emitLog) {
-  await encerrarSessao(userId, true);
-  emitLog(userId, '🔌 WhatsApp desconectado e sessão removida.');
-}
-
-async function encerrarSessao(userId, limpar = false) {
   const sock = sessions.get(userId);
   if (sock) {
     try { await sock.logout(); } catch (_) {}
@@ -141,7 +139,18 @@ async function encerrarSessao(userId, limpar = false) {
     sessions.delete(userId);
   }
   statusMap.delete(userId);
-  if (limpar) limparSessao(userId);
+  limparSessao(userId);
+  emitLog(userId, '🔌 WhatsApp desconectado e sessão removida.');
+}
+
+// Fecha o socket sem apagar as creds — usado antes de reconectar
+async function _fecharSocket(userId) {
+  const sock = sessions.get(userId);
+  if (sock) {
+    try { sock.ws?.close(); } catch (_) {}
+    sessions.delete(userId);
+  }
+  statusMap.delete(userId);
 }
 
 function limparSessao(userId) {
@@ -149,9 +158,7 @@ function limparSessao(userId) {
   try { fs.rmSync(authPath, { recursive: true, force: true }); } catch (_) {}
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Enviar Mensagem
-// ─────────────────────────────────────────────────────────────────────────────
+// ── Enviar mensagem ───────────────────────────────────────────────────────────
 async function enviarMensagem(userId, numero, mensagem, emitLog) {
   const sock = sessions.get(userId);
   if (!sock) {
@@ -160,17 +167,13 @@ async function enviarMensagem(userId, numero, mensagem, emitLog) {
   }
 
   try {
-    // Limpa o número e monta o JID
     const clean = String(numero).replace(/\D/g, '');
     if (clean.length < 10) {
       emitLog(userId, `⚠️ Número inválido ignorado: ${numero}`);
       return false;
     }
-
-    // Brasil: adiciona 55 se não tiver DDI
     const withDDI = clean.startsWith('55') ? clean : `55${clean}`;
     const jid = `${withDDI}@s.whatsapp.net`;
-
     await sock.sendMessage(jid, { text: mensagem });
     emitLog(userId, `✅ Mensagem enviada → +${withDDI}`);
     return true;
@@ -181,7 +184,7 @@ async function enviarMensagem(userId, numero, mensagem, emitLog) {
 }
 
 function isConectado(userId) {
-  return sessions.has(userId) && (statusMap.get(userId)?.connected === true);
+  return sessions.has(userId) && statusMap.get(userId)?.connected === true;
 }
 
 function getStatus(userId) {

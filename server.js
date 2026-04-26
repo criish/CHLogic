@@ -4,6 +4,7 @@ const http = require('http');
 const { Server } = require('socket.io');
 const session = require('express-session');
 const path = require('path');
+const fs = require('fs');
 
 const { getDb } = require('./database');
 const { agendarJob } = require('./regua');
@@ -17,12 +18,9 @@ const io = new Server(server, {
   pingInterval: 25000,
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Middlewares
-// ─────────────────────────────────────────────────────────────────────────────
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(__dirname, '..', 'public')));
 
 const sessionMiddleware = session({
   secret: process.env.SESSION_SECRET || 'CH_SNIPER_2026_SECRET',
@@ -32,36 +30,26 @@ const sessionMiddleware = session({
 });
 
 app.use(sessionMiddleware);
-
-// Compartilha sessão com Socket.IO
 io.use((socket, next) => sessionMiddleware(socket.request, {}, next));
 
-// ─────────────────────────────────────────────────────────────────────────────
-// emitLog: envia log para o room do usuário via Socket.IO
-// ─────────────────────────────────────────────────────────────────────────────
+// ── emitLog ──────────────────────────────────────────────────────────────────
 function emitLog(userId, msg) {
   const timestamp = new Date().toLocaleTimeString('pt-BR');
   io.to(`room_${userId}`).emit('log', `[${timestamp}] ${msg}`);
   console.log(`[USR:${userId}] ${msg}`);
 }
 
-// Disponibiliza emitLog e io para as routes via app.set
 app.set('emitLog', emitLog);
 app.set('io', io);
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Rotas
-// ─────────────────────────────────────────────────────────────────────────────
+// ── Rotas ─────────────────────────────────────────────────────────────────────
 app.use('/api', routes);
 
-// SPA fallback — qualquer rota não-API serve o index.html
 app.get(/^(?!\/api).*/, (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+  res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Socket.IO
-// ─────────────────────────────────────────────────────────────────────────────
+// ── Socket.IO ─────────────────────────────────────────────────────────────────
 io.on('connection', (socket) => {
   const userId = socket.request.session?.userId;
   if (!userId) return;
@@ -69,7 +57,6 @@ io.on('connection', (socket) => {
   socket.join(`room_${userId}`);
   console.log(`🔌 Socket conectado: usuário ${userId}`);
 
-  // Envia status atual do WhatsApp ao conectar
   const { getStatus } = require('./whatsapp');
   socket.emit('whatsapp_status', getStatus(userId));
 
@@ -78,14 +65,16 @@ io.on('connection', (socket) => {
   });
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Inicialização
-// ─────────────────────────────────────────────────────────────────────────────
+// ── Inicialização ─────────────────────────────────────────────────────────────
 async function init() {
   const db = await getDb();
+  const { conectarWhatsApp } = require('./whatsapp');
 
-  // Agenda jobs para todos os usuários ativos
-  const users = await db.all('SELECT id, horario_cobranca FROM users WHERE ativo = 1 AND is_admin = 0');
+  const users = await db.all(
+    'SELECT id, horario_cobranca FROM users WHERE ativo = 1 AND is_admin = 0'
+  );
+
+  // Agenda cron jobs de cobrança
   for (const u of users) {
     if (u.horario_cobranca) {
       agendarJob(u.id, u.horario_cobranca, emitLog);
@@ -100,6 +89,44 @@ async function init() {
     console.log(`📋 Painel: http://localhost:${PORT}`);
     console.log(`🛡️  Admin: http://localhost:${PORT}/admin.html\n`);
   });
+
+  // ── Reconexão automática do WhatsApp no boot ──────────────────────────────
+  // Aguarda 3s para o servidor estar totalmente pronto antes de reconectar
+  setTimeout(async () => {
+    const AUTH_DIR = path.join(__dirname, '..', 'auth_sessions');
+
+    let reconectados = 0;
+    for (const u of users) {
+      const authPath = path.join(AUTH_DIR, `user_${u.id}`);
+
+      // Só reconecta se a pasta de credenciais existir E não estiver vazia
+      const temSessao =
+        fs.existsSync(authPath) &&
+        fs.readdirSync(authPath).some((f) => f.endsWith('.json'));
+
+      if (!temSessao) continue;
+
+      console.log(`📱 [boot] Reconectando WhatsApp do usuário ${u.id}...`);
+
+      // phoneNumber = null → usa as creds salvas em disco, sem pedir QR/código
+      conectarWhatsApp(u.id, io, emitLog, null).catch((err) =>
+        console.error(`❌ Erro ao reconectar usuário ${u.id}: ${err.message}`)
+      );
+
+      reconectados++;
+
+      // Delay entre reconexões para não sobrecarregar o servidor do WhatsApp
+      if (reconectados < users.length) {
+        await new Promise((r) => setTimeout(r, 3000));
+      }
+    }
+
+    if (reconectados > 0) {
+      console.log(`✅ ${reconectados} sessão(ões) WhatsApp reconectada(s) no boot.`);
+    } else {
+      console.log('ℹ️  Nenhuma sessão WhatsApp salva para reconectar.');
+    }
+  }, 3000);
 }
 
 init().catch((err) => {
