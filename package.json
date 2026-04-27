@@ -2,16 +2,18 @@
   "name": "chlogic-sniper",
   "version": "4.0.0",
   "description": "CH Logic IPTV Sniper - Sistema de Cobrança Automática",
-  "main": "server.js",
+  "main": "src/server.js",
+  "engines": {
+    "node": "20.x"
+  },
   "scripts": {
-    "start": "node server.js",
-    "dev": "node --watch server.js"
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js"
   },
   "dependencies": {
     "@hapi/boom": "^9.1.4",
     "@whiskeysockets/baileys": "^7.0.0-rc.9",
     "axios": "^1.7.2",
-    "bcryptjs": "^2.4.3",
     "cors": "^2.8.5",
     "express": "^4.19.2",
     "express-session": "^1.18.0",
