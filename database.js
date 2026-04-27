@@ -1,6 +1,7 @@
 // src/database.js
 const sqlite3 = require('sqlite3');
 const { open } = require('sqlite');
+const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const path = require('path');
 
@@ -8,8 +9,9 @@ let db;
 
 async function getDb() {
   if (db) return db;
+  const databaseFile = process.env.DATABASE_FILE || path.join(__dirname, 'database.sqlite');
   db = await open({
-    filename: path.join(__dirname, '..', 'database.sqlite'),
+    filename: databaseFile,
     driver: sqlite3.Database,
   });
 
@@ -71,7 +73,20 @@ async function getDb() {
 }
 
 function hashSenha(senha) {
-  return crypto.createHash('sha256').update(senha).digest('hex');
+  return bcrypt.hashSync(String(senha), 10);
 }
 
-module.exports = { getDb, hashSenha };
+function hashSenhaLegacy(senha) {
+  return crypto.createHash('sha256').update(String(senha)).digest('hex');
+}
+
+function verificarSenha(senha, hash) {
+  if (!hash) return false;
+  const clean = String(senha);
+  if (typeof hash === 'string' && hash.startsWith('$2')) {
+    return bcrypt.compareSync(clean, hash);
+  }
+  return hashSenhaLegacy(clean) === hash;
+}
+
+module.exports = { getDb, hashSenha, verificarSenha };

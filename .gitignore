@@ -13,10 +13,19 @@ rastreador.js
 .wwebjs_auth/
 .wwebjs_cache/
 auth_info_1
+auth_sessions/
+
+# Backup e arquivos gerados localmente
+backup_CHLogic_2026-04-27/
+archived-scripts/
+*.zip
+npm-debug.log*
 
 # Arquivos de ambiente/senhas
 .env
 
 # Arquivos do VS Code e Sistema
 .vscode/
+.DS_Store
+.idea/
 thumbs.db

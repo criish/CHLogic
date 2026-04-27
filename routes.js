@@ -1,7 +1,7 @@
 // src/routes.js
 const express = require('express');
 const router = express.Router();
-const { getDb, hashSenha } = require('./database');
+const { getDb, hashSenha, verificarSenha } = require('./database');
 const { capturarToken, buscarClientes } = require('./sigma');
 const { conectarWhatsApp, desconectarWhatsApp, isConectado, getStatus } = require('./whatsapp');
 const { varreduraCompleta, agendarJob, cancelarJob } = require('./regua');
@@ -30,11 +30,15 @@ router.post('/login', async (req, res) => {
     const db = await getDb();
     const found = await db.get('SELECT * FROM users WHERE username = ?', [user]);
 
-    if (!found || found.password !== hashSenha(pass))
+    if (!found || !verificarSenha(pass, found.password))
       return res.status(401).json({ error: 'Usuário ou senha inválidos' });
 
     if (!found.ativo)
       return res.status(403).json({ error: 'Conta suspensa. Contate o suporte.' });
+
+    if (found.password && typeof found.password === 'string' && !found.password.startsWith('$2')) {
+      await db.run('UPDATE users SET password = ? WHERE id = ?', [hashSenha(pass), found.id]);
+    }
 
     req.session.userId = found.id;
     req.session.isAdmin = found.is_admin === 1;
@@ -230,8 +234,12 @@ router.post('/admin/login', async (req, res) => {
     const db = await getDb();
     const found = await db.get('SELECT * FROM users WHERE username = ? AND is_admin = 1', [user]);
 
-    if (!found || found.password !== hashSenha(pass))
+    if (!found || !verificarSenha(pass, found.password))
       return res.status(401).json({ error: 'Acesso negado' });
+
+    if (found.password && typeof found.password === 'string' && !found.password.startsWith('$2')) {
+      await db.run('UPDATE users SET password = ? WHERE id = ?', [hashSenha(pass), found.id]);
+    }
 
     req.session.userId = found.id;
     req.session.isAdmin = true;
