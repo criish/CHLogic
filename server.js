@@ -7,8 +7,8 @@ const path = require('path');
 const fs = require('fs');
 
 const { getDb } = require('./database');
-const { agendarJob } = require('./regua');
-const routes = require('./routes');
+const { agendarJob } = require('./src/regua');
+const routes = require('./src/routes');
 
 const app = express();
 const server = http.createServer(app);
@@ -65,7 +65,7 @@ io.on('connection', (socket) => {
   socket.join(`room_${userId}`);
   console.log(`🔌 Socket conectado: usuário ${userId}`);
 
-  const { getStatus } = require('./whatsapp');
+  const { getStatus } = require('./src/whatsapp');
   socket.emit('whatsapp_status', getStatus(userId));
 
   socket.on('disconnect', () => {
@@ -76,7 +76,7 @@ io.on('connection', (socket) => {
 // ── Inicialização ─────────────────────────────────────────────────────────────
 async function init() {
   const db = await getDb();
-  const { conectarWhatsApp } = require('./whatsapp');
+  const { conectarWhatsApp } = require('./src/whatsapp');
 
   const users = await db.all(
     'SELECT id, horario_cobranca FROM users WHERE ativo = 1 AND is_admin = 0'

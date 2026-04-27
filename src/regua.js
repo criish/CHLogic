@@ -2,9 +2,9 @@
 // Régua de cobrança: detecta clientes por dias de vencimento e gera mensagens
 
 const cron = require('node-cron');
-const { getDb } = require('./database');
+const { getDb } = require('../database');
 const { enviarMensagem, isConectado } = require('./whatsapp');
-const { buscarClientes } = require('./sigma');
+const { buscarClientes } = require('../sigma');
 
 // Dias da régua de cobrança (negativo = já venceu, positivo = vai vencer)
 const REGUA_DIAS = [-7, -5, -3, -1, 0, 1, 2, 3, 5, 7];

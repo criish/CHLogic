@@ -1,8 +1,8 @@
 // src/routes.js
 const express = require('express');
 const router = express.Router();
-const { getDb, hashSenha, verificarSenha } = require('./database');
-const { capturarToken, buscarClientes } = require('./sigma');
+const { getDb, hashSenha, verificarSenha } = require('../database');
+const { capturarToken, buscarClientes } = require('../sigma');
 const { conectarWhatsApp, desconectarWhatsApp, isConectado, getStatus } = require('./whatsapp');
 const { varreduraCompleta, agendarJob, cancelarJob } = require('./regua');
 
