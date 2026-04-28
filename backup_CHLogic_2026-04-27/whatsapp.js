@@ -1,9 +1,15 @@
 // src/whatsapp.js
-const { getDb } = require('./database');
+const {
+  default: makeWASocket,
+  useMultiFileAuthState,
+  DisconnectReason,
+  fetchLatestBaileysVersion,
+} = require('@whiskeysockets/baileys');
+const { Boom } = require('@hapi/boom');
+const pino = require('pino');
 const fs = require('fs');
 const path = require('path');
-const pino = require('pino');
-const QRCode = require('qrcode');
+const qrcode = require('qrcode');
 
 const AUTH_DIR = path.join(__dirname, '..', 'auth_sessions');
 if (!fs.existsSync(AUTH_DIR)) fs.mkdirSync(AUTH_DIR, { recursive: true });
