@@ -1,6 +1,7 @@
 // src/database.js
 const sqlite3 = require('sqlite3');
 const { open } = require('sqlite');
+const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const path = require('path');
 
@@ -9,7 +10,7 @@ let db;
 async function getDb() {
   if (db) return db;
   db = await open({
-    filename: path.join(__dirname, '..', 'database.sqlite'),
+    filename: process.env.DATABASE_FILE || path.join(__dirname, 'database.sqlite'),
     driver: sqlite3.Database,
   });
 
@@ -71,7 +72,24 @@ async function getDb() {
 }
 
 function hashSenha(senha) {
+  // Use bcrypt with 10 rounds (fast enough for registration)
+  return bcrypt.hashSync(String(senha), 10);
+}
+
+function hashSenhaLegacy(senha) {
+  // SHA-256 for backward compatibility with old passwords
   return crypto.createHash('sha256').update(senha).digest('hex');
 }
 
-module.exports = { getDb, hashSenha };
+function verificarSenha(senha, hash) {
+  // Check if hash is bcrypt (starts with $2a, $2b, or $2y)
+  if (hash && typeof hash === 'string' && hash.startsWith('$2')) {
+    return bcrypt.compareSync(String(senha), hash);
+  }
+  
+  // Fall back to SHA-256 for legacy hashes
+  const sha256Hash = crypto.createHash('sha256').update(senha).digest('hex');
+  return hash === sha256Hash;
+}
+
+module.exports = { getDb, hashSenha, hashSenhaLegacy, verificarSenha };
